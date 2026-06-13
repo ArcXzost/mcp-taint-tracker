@@ -1,0 +1,13 @@
+__pycache__/
+venv/
+env/
+.env
+models/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.db
+*.sqlite3
+truth_matrix.csv
+optimized_thresholds.json
