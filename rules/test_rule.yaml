@@ -1,0 +1,9 @@
+name: 'Test Rule'
+severity: 'high'
+pattern:
+  source:
+    tools: ['filesystem_read']
+  path:
+    max_hops: 5
+  sink:
+    tools: ['http_request']

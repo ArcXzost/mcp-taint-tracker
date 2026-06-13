@@ -1,0 +1,10 @@
+name: "Memory Poisoning to Tool Action"
+severity: "HIGH"
+pattern:
+  source:
+    taints: ["user_input", "external_data"]
+  path:
+    max_hops: 3
+    requires_taint: true
+  sink:
+    tools: ["tool_action", "code_execution"]

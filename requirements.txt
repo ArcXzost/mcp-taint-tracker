@@ -1,0 +1,19 @@
+# MCP Semantic Taint Tracker MVP - Dependencies
+pydantic>=2.0,<3.0
+networkx>=3.1,<4.0
+rapidfuzz>=3.0,<4.0
+sentence-transformers>=2.2,<3.0
+matplotlib>=3.7,<4.0
+numpy>=1.24,<2.0
+
+# API Server
+fastapi>=0.100.0,<1.0
+uvicorn>=0.22.0,<1.0
+
+# Integration example
+requests>=2.28,<3.0
+
+# Optional: OpenTelemetry + Arize Phoenix
+opentelemetry-sdk>=1.20,<2.0
+opentelemetry-api>=1.20,<2.0
+arize-phoenix>=4.0,<6.0

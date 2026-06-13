@@ -1,0 +1,56 @@
+/* ============================================================================
+   MCP Semantic Taint Tracker — Tailwind Overrides
+   ============================================================================ */
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.5); /* gray-400 */
+  border-radius: 9999px;
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(75, 85, 99, 0.5); /* gray-600 */
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(107, 114, 128, 0.8); /* gray-500 */
+}
+
+/* Vis-network overrides to make the canvas match Tailwind border styles */
+.vis-network {
+  outline: none !important;
+}
+
+/* Toast fade animation */
+.toast-slide-in {
+  animation: slideInRight 0.3s ease-out;
+}
+.toast-slide-out {
+  animation: slideOutRight 0.3s ease-in forwards;
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes slideOutRight {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(24px); }
+}
+
+
+
+/* Active toggle button override */
+.active {
+    background-color: #f3f4f6 !important;
+    color: #1d4ed8 !important;
+}
+.dark .active {
+    background-color: #374151 !important;
+    color: #fff !important;
+}

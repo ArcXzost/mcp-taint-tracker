@@ -1,0 +1,10 @@
+name: "Filesystem Exfiltration"
+severity: "HIGH"
+pattern:
+  source:
+    taints: ["filesystem"]
+  path:
+    max_hops: 5
+    requires_taint: true
+  sink:
+    tools: ["http_request", "http_post"]
