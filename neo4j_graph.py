@@ -207,9 +207,10 @@ class Neo4jSessionGraph:
                     edges.append({
                         "from": record["src"],
                         "to": record["tgt"],
-                        "confidence": r.get("confidence", 0.0),
-                        "edge_type": r.get("method", "unknown"),
-                        "evidence": r.get("evidence", ""),
+                        "confidence": r.get("confidence", 1.0),
+                        "method": r.get("method", "explicit"),
+                        "edge_type": r.get("method", "explicit"),
+                        "evidence": r.get("evidence", "")
                     })
         except Exception as e:
             logger.error(f"Error fetching Neo4j graph: {e}")
@@ -237,7 +238,9 @@ class Neo4jSessionGraph:
                     edges.append({
                         "from": record["src"],
                         "to": record["tgt"],
-                        "label": record["method"]
+                        "confidence": r.get("confidence", 1.0),
+                        "method": r.get("method", "unknown"),
+                        "evidence": r.get("evidence", "")
                     })
         except:
             pass

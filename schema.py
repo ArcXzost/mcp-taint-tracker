@@ -109,6 +109,8 @@ class Alert(BaseModel):
     rule: str
     source_node: str
     sink_node: str
+    source_call_id: str = ""
+    sink_call_id: str = ""
     path: List[str]
     confidence: float
     evidence: str

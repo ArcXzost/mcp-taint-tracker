@@ -128,9 +128,11 @@ class GraphNode(BaseModel):
 
 class GraphEdge(BaseModel):
     """Edge representation for the dashboard graph renderer."""
-    from_id: str = Field(alias="from")
-    to_id: str = Field(alias="to")
+    from_: str = Field(alias="from")
+    to: str
     confidence: float
+    method: str = "unknown"
+    evidence: str = ""
     edge_type: str
     evidence: str
 
@@ -236,6 +238,14 @@ async def process_kafka_message(msg: Dict[str, Any]):
     # 3. Evaluate Policies
     all_alerts = policy_engine.evaluate(graph, session_id=session_id)
     
+    # Preserve existing triage status across re-evaluations
+    if session_id in session_alerts:
+        existing_alerts = {a.alert_id: a.triage_status for a in session_alerts[session_id]}
+        for new_alert in all_alerts:
+            if new_alert.alert_id in existing_alerts:
+                new_alert.triage_status = existing_alerts[new_alert.alert_id]
+                
+    print(f"KAFKA PROCESSOR ALERTS FOR {session_id}: {all_alerts}")
     session_alerts[session_id] = all_alerts
     
     # Record telemetry
@@ -408,6 +418,10 @@ async def run_learning_pipeline():
         if os.path.exists(thresh_file):
             with open(thresh_file, "r") as f:
                 opt = json.load(f)
+                
+            # Hot-reload into the policy engine!
+            policy_engine.reload_thresholds()
+            
             return {"status": "ok", "message": "Learning pipeline executed successfully", "thresholds": opt}
         return {"status": "ok", "message": "Learning pipeline ran but no thresholds generated (insufficient data)."}
     except subprocess.CalledProcessError as e:
@@ -474,15 +488,16 @@ async def get_config():
     first_graph = next(iter(session_graphs.values()))
     return first_graph.flow_engine.active_tiers
 
+class TierToggleRequest(BaseModel):
+    tier: str
+    enabled: bool
+
 @app.post("/api/config")
-async def set_config(req: ConfigRequest):
+async def set_config(req: TierToggleRequest):
     """Set the active tiers configuration."""
     for graph in session_graphs.values():
-        graph.flow_engine.active_tiers = {
-            "explicit": req.explicit,
-            "lexical": req.lexical,
-            "semantic": req.semantic
-        }
+        if req.tier in graph.flow_engine.active_tiers:
+            graph.flow_engine.active_tiers[req.tier] = req.enabled
     return {"status": "ok"}
 
 @app.get("/api/metrics")

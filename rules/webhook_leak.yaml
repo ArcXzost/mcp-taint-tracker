@@ -2,7 +2,7 @@ name: "Data Exfiltration via Webhook"
 severity: "HIGH"
 pattern:
   source:
-    taints: ["filesystem", "user_input", "credential", "database"]
+    taints: ["filesystem", "user_input", "credential", "database", "email"]
   path:
     max_hops: 4
     requires_taint: true

@@ -1,10 +1,10 @@
-name: "Filesystem Exfiltration"
-severity: "HIGH"
+name: "Data Exfiltration"
+severity: "CRITICAL"
 pattern:
   source:
-    taints: ["filesystem"]
+    taints: ["filesystem", "credential"]
   path:
     max_hops: 5
     requires_taint: true
   sink:
-    tools: ["http_request", "http_post"]
+    tools: ["http_request", "http_post", "webhook"]

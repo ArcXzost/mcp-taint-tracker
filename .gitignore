@@ -11,3 +11,4 @@ models/
 *.sqlite3
 truth_matrix.csv
 optimized_thresholds.json
+server.log

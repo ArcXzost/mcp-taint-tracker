@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentVault — MCP Semantic Taint Tracker</title>
+  <title>TaintDog</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -12,407 +12,341 @@
       theme: {
         extend: {
           colors: {
-            primary: { "50": "#eff6ff", "100": "#dbeafe", "200": "#bfdbfe", "300": "#93c5fd", "400": "#60a5fa", "500": "#3b82f6", "600": "#2563eb", "700": "#1d4ed8", "800": "#1e40af", "900": "#1e3a8a", "950": "#172554" }
+            surface: '#ffffff',
+            'surface-dim': '#f6f6f4',
+            outline: '#000000',
+            'outline-variant': '#aaaaaa',
+            primary: '#000000',
+            'primary-on': '#ffffff',
+            secondary: '#ffcfb3',
+            'secondary-on': '#000000',
+            error: '#ff3b30',
+            'error-container': '#ffebe9',
+            'error-onContainer': '#d70015',
+            muted: '#666666'
+          },
+          fontFamily: {
+            sans: ['"Instrument Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace']
+          },
+          borderRadius: {
+            none: '0',
+            sm: '4px',
+            DEFAULT: '8px',
+            md: '12px',
+            lg: '16px',
+            xl: '24px',
+            full: '999px'
+          },
+          boxShadow: {
+            card: '0 8px 32px rgba(0, 0, 0, 0.08)',
+            overlay: '0 24px 64px rgba(0, 0, 0, 0.18)',
+            stack: '0 8px 0 -1px #f6f6f4, 0 8px 0 0 #000000'
           }
-        },
-        fontFamily: {
-          'body': ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'system-ui', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'Noto Sans', 'sans-serif', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'],
-          'sans': ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'system-ui', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'Noto Sans', 'sans-serif', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji']
         }
       }
     }
   </script>
   <link href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" rel="stylesheet" />
-  
   <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
-  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .bg-dot-grid {
+      background-image: radial-gradient(circle at 1px 1px, #dad8de 1px, transparent 0);
+      background-size: 18px 18px;
+    }
+    #graph-container, .vis-network { outline: none; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #aaaaaa; border-radius: 999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #000000; }
+  </style>
 </head>
-<body class="bg-gray-50 dark:bg-gray-900 overflow-hidden h-screen flex flex-col font-sans antialiased text-gray-900 dark:text-white">
+<body class="bg-surface overflow-hidden h-screen flex flex-col font-sans antialiased text-primary">
 
   <!-- Navbar -->
-  <nav class="fixed top-0 z-50 w-full bg-white border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700 h-16 shrink-0">
-    <div class="px-3 py-3 lg:px-5 lg:pl-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center justify-start rtl:justify-end">
-          <button data-drawer-target="logo-sidebar" data-drawer-toggle="logo-sidebar" aria-controls="logo-sidebar" type="button" class="inline-flex items-center p-2 text-sm text-gray-500 rounded-lg sm:hidden hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:text-gray-400 dark:hover:bg-gray-700 dark:focus:ring-gray-600">
-              <span class="sr-only">Open sidebar</span>
-              <svg class="w-6 h-6" aria-hidden="true" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-                 <path clip-rule="evenodd" fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zm0 10.5a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10z"></path>
-              </svg>
-           </button>
-          <a href="#" class="flex ms-2 md:me-24 items-center gap-2">
-            <div class="p-1.5 bg-primary-600 rounded-lg text-white">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 2L3 7v5c0 5.25 3.75 10.14 9 11.43C17.25 22.14 21 17.25 21 12V7l-9-5z"/><path d="M9 12l2 2 4-4" opacity=".6"/>
-              </svg>
-            </div>
-            <div>
-              <span class="self-center text-xl font-semibold sm:text-2xl whitespace-nowrap dark:text-white">AgentVault</span>
-              <span class="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">MCP Taint Tracker</span>
-            </div>
-          </a>
+  <nav class="fixed top-0 z-50 w-full bg-surface border-b-[1.5px] border-outline h-16 shrink-0 flex items-center justify-between px-6 shadow-sm">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-on">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L3 7v5c0 5.25 3.75 10.14 9 11.43C17.25 22.14 21 17.25 21 12V7l-9-5z"/><path d="M9 12l2 2 4-4" opacity=".6"/>
+          </svg>
+        </div>
+        <div>
+          <span class="block text-xl font-bold tracking-tight">TaintDog</span>
         </div>
         
-        <div class="flex items-center gap-3">
-          <div class="hidden md:flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-full">
-            <span id="status-dot" class="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse"></span>
-            <span id="status-text" class="text-xs font-bold text-green-700 dark:text-green-400 uppercase tracking-wide">Idle</span>
-          </div>
-
-          <button id="btn-learn" onclick="runLearningPipeline()" type="button" class="text-purple-700 bg-purple-100 hover:bg-purple-200 focus:ring-4 focus:ring-purple-300 font-medium rounded-lg text-sm px-4 py-2 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50 focus:outline-none dark:focus:ring-purple-800 flex items-center gap-2 border border-purple-300 dark:border-purple-800">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-            Auto-Tune AI
-          </button>
-
-          <!-- Tiers Dropdown -->
-          <button id="dropdownTiersButton" data-dropdown-toggle="dropdownTiers" class="text-gray-900 bg-white border border-gray-300 focus:outline-none hover:bg-gray-100 focus:ring-4 focus:ring-gray-100 font-medium rounded-lg text-sm px-4 py-2 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:hover:bg-gray-700 dark:hover:border-gray-600 dark:focus:ring-gray-700 flex items-center gap-2" type="button">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+        <!-- Attribution Tiers Dropdown -->
+        <div class="hidden md:flex items-center gap-2 ml-6 pl-6 border-l-[1.5px] border-outline relative">
+          <button id="tiersDropdownBtn" data-dropdown-toggle="tiersDropdown" class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold">
             Detection Tiers
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
-          <!-- Dropdown menu -->
-          <div id="dropdownTiers" class="z-10 hidden bg-white divide-y divide-gray-100 rounded-lg shadow-sm w-48 dark:bg-gray-700 dark:divide-gray-600">
-              <ul class="p-3 space-y-3 text-sm text-gray-700 dark:text-gray-200" aria-labelledby="dropdownTiersButton">
-                <li>
-                  <div class="flex items-center">
-                    <input id="toggle-explicit" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded-sm focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500" onchange="updateConfig()">
-                    <label for="toggle-explicit" class="ms-2 text-sm font-medium text-gray-900 dark:text-gray-300">Explicit (Exact Match)</label>
-                  </div>
-                </li>
-                <li>
-                  <div class="flex items-center">
-                    <input id="toggle-lexical" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded-sm focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500" onchange="updateConfig()">
-                    <label for="toggle-lexical" class="ms-2 text-sm font-medium text-gray-900 dark:text-gray-300">Lexical (Fuzzy)</label>
-                  </div>
-                </li>
-                <li>
-                  <div class="flex items-center">
-                    <input id="toggle-semantic" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded-sm focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500" onchange="updateConfig()">
-                    <label for="toggle-semantic" class="ms-2 text-sm font-medium text-gray-900 dark:text-gray-300">Semantic (Embeddings)</label>
-                  </div>
-                </li>
-              </ul>
+          <div id="tiersDropdown" class="z-50 hidden bg-surface border-[1.5px] border-outline rounded-lg shadow-overlay w-48">
+            <ul class="p-3 space-y-3 text-sm font-mono" aria-labelledby="tiersDropdownBtn">
+              <li>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="tier-explicit" class="accent-black w-4 h-4" checked onchange="toggleTier('explicit', this.checked)">
+                  Explicit
+                </label>
+              </li>
+              <li>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="tier-lexical" class="accent-black w-4 h-4" checked onchange="toggleTier('lexical', this.checked)">
+                  Lexical
+                </label>
+              </li>
+              <li>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="tier-semantic" class="accent-black w-4 h-4" checked onchange="toggleTier('semantic', this.checked)">
+                  Semantic
+                </label>
+              </li>
+            </ul>
           </div>
-
-          <button id="btn-simulate" onclick="runSimulation()" type="button" class="text-white bg-primary-700 hover:bg-primary-800 focus:ring-4 focus:ring-primary-300 font-medium rounded-lg text-sm px-4 py-2 dark:bg-primary-600 dark:hover:bg-primary-700 focus:outline-none dark:focus:ring-primary-800 flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21"/></svg>
-            Run Simulation
-          </button>
-          
-          <button id="btn-rules" onclick="openRulesModal()" data-modal-target="rules-modal" data-modal-toggle="rules-modal" type="button" class="text-gray-900 bg-white border border-gray-300 focus:outline-none hover:bg-gray-100 focus:ring-4 focus:ring-gray-100 font-medium rounded-lg text-sm px-4 py-2 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:hover:bg-gray-700 dark:hover:border-gray-600 dark:focus:ring-gray-700 flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-            YAML Rules
-          </button>
-
-          <button id="btn-connect-mcp" onclick="openMcpModal()" data-modal-target="mcp-modal" data-modal-toggle="mcp-modal" type="button" class="text-gray-900 bg-white border border-gray-300 focus:outline-none hover:bg-gray-100 focus:ring-4 focus:ring-gray-100 font-medium rounded-lg text-sm px-4 py-2 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:hover:bg-gray-700 dark:hover:border-gray-600 dark:focus:ring-gray-700 flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6m-4-2v4m8-4v4"/><rect x="4" y="10" width="16" height="4" rx="1"/><path d="M9 14v4a3 3 0 0 0 6 0v-4"/></svg>
-            Connect MCP
-          </button>
-          
-          <button id="btn-refresh" onclick="refreshDashboard()" type="button" class="text-gray-500 hover:text-gray-900 hover:bg-gray-100 p-2 rounded-lg dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-700">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            <span class="sr-only">Refresh</span>
-          </button>
-          
-          <button id="btn-reset" onclick="resetDashboard()" type="button" class="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-gray-700">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-            <span class="sr-only">Reset</span>
-          </button>
         </div>
       </div>
-    </div>
+      
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-full border-[1.5px] border-outline shadow-stack bg-surface">
+          <span id="status-dot" class="w-2.5 h-2.5 bg-secondary rounded-full animate-pulse"></span>
+          <span id="status-text" class="text-xs font-mono font-medium tracking-widest uppercase">Idle</span>
+        </div>
+
+        <button id="btn-learn" onclick="runLearningPipeline()" class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          Tune
+        </button>
+
+        <button id="btn-reset" onclick="resetDashboard()" class="flex items-center justify-center w-10 h-10 rounded-full border-[1.5px] border-outline bg-error-container text-error-onContainer hover:bg-error transition-all text-sm font-semibold" title="Clear Data">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+
+        <button onclick="openConnectModal()" class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          Connect MCP
+        </button>
+
+        <select id="sim-dropdown" class="h-10 px-3 rounded-md border-[1.5px] border-outline bg-surface text-sm font-medium focus:border-outline focus:ring-0 outline-none">
+          <option value="" disabled selected>Select a simulation...</option>
+        </select>
+
+        <button id="btn-simulate" onclick="runSimulation()" class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-primary text-primary-on hover:bg-secondary hover:text-secondary-on transition-all text-sm font-semibold shadow-stack">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21"/></svg>
+          Run
+        </button>
+
+        <button id="btn-rules" onclick="openRulesModal()" class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold">
+          YAML Rules
+        </button>
+      </div>
   </nav>
 
-  <!-- Sidebar -->
-  <aside id="logo-sidebar" class="fixed top-16 left-0 z-40 w-80 h-[calc(100vh-4rem)] transition-transform -translate-x-full sm:translate-x-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800" aria-label="Sidebar">
-     <div class="h-full px-4 py-4 overflow-y-auto custom-scrollbar flex flex-col gap-6">
-        
-        <!-- Metrics Sections -->
-        <div>
-           <h3 class="flex items-center gap-2 mb-3 text-xs font-semibold text-gray-500 uppercase dark:text-gray-400">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-              Detection Accuracy
-           </h3>
-           <div class="grid grid-cols-2 gap-3">
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-precision">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">Precision <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-precision">—</div>
-              </div>
-              <div id="tt-precision" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">Ratio of correctly detected true attacks to total alerts generated (1.0 = no false positives).<div class="tooltip-arrow" data-popper-arrow></div></div>
-
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-recall">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">Recall <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-recall">—</div>
-              </div>
-              <div id="tt-recall" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">Ratio of correctly detected true attacks to total actual attacks in the benchmark (1.0 = no false negatives).<div class="tooltip-arrow" data-popper-arrow></div></div>
-
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-f1">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">F1 <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-f1">—</div>
-              </div>
-              <div id="tt-f1" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">Harmonic mean of precision and recall. A measure of overall detection accuracy.<div class="tooltip-arrow" data-popper-arrow></div></div>
-
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-fpr">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">FPR <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-fpr">—</div>
-              </div>
-              <div id="tt-fpr" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">False Positive Rate: Proportion of benign workflows incorrectly flagged as attacks.<div class="tooltip-arrow" data-popper-arrow></div></div>
-           </div>
-        </div>
-
-        <div>
-           <h3 class="flex items-center gap-2 mb-3 text-xs font-semibold text-gray-500 uppercase dark:text-gray-400">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              Runtime Overhead
-           </h3>
-           <div class="grid grid-cols-2 gap-3">
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-p50">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">P50 <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-p50">—</div>
-              </div>
-              <div id="tt-p50" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">Median latency overhead added by the taint tracking engine per intercepted event.<div class="tooltip-arrow" data-popper-arrow></div></div>
-
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-p95">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">P95 <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-p95">—</div>
-              </div>
-              <div id="tt-p95" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">95th percentile latency (worst-case tail latency) added per intercepted event.<div class="tooltip-arrow" data-popper-arrow></div></div>
-
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-memory">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">Peak Mem <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-memory">—</div>
-              </div>
-              <div id="tt-memory" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">Maximum memory footprint consumed by attribution models and session graphs.<div class="tooltip-arrow" data-popper-arrow></div></div>
-
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-attr-cost">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">Attr Cost <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-attr-cost">—</div>
-              </div>
-              <div id="tt-attr-cost" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">Percentage of total processing time spent running attribution models vs logging.<div class="tooltip-arrow" data-popper-arrow></div></div>
-           </div>
-        </div>
-
-        <div>
-           <h3 class="flex items-center gap-2 mb-3 text-xs font-semibold text-gray-500 uppercase dark:text-gray-400">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-              Flow Attribution
-           </h3>
-           <div class="grid grid-cols-2 gap-3">
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-explicit">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">Explicit <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-explicit">—</div>
-              </div>
-              <div id="tt-explicit" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">Flows detected via exact substring matching of tool outputs to inputs.<div class="tooltip-arrow" data-popper-arrow></div></div>
-
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-lexical">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">Lexical <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-lexical">—</div>
-              </div>
-              <div id="tt-lexical" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">Flows detected via fuzzy matching and token overlap heuristics.<div class="tooltip-arrow" data-popper-arrow></div></div>
-
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-semantic">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">Semantic <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-semantic">—</div>
-              </div>
-              <div id="tt-semantic" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">Flows detected via high-dimensional vector embeddings and cosine similarity.<div class="tooltip-arrow" data-popper-arrow></div></div>
-
-              <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md" data-tooltip-target="tt-confidence">
-                 <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium flex items-center justify-between">Avg Conf <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
-                 <div class="mt-1 text-xl font-bold font-mono text-gray-900 dark:text-white" id="m-confidence">—</div>
-              </div>
-              <div id="tt-confidence" role="tooltip" class="absolute z-50 invisible inline-block px-3 py-2 text-xs font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 max-w-xs">Average confidence score of all established taint propagation edges.<div class="tooltip-arrow" data-popper-arrow></div></div>
-           </div>
-        </div>
-
-        <div>
-           <h3 class="flex items-center gap-2 mb-3 text-xs font-semibold text-gray-500 uppercase dark:text-gray-400">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              Active Sessions
-           </h3>
-           <div id="session-list" class="flex flex-col gap-2">
-              <div class="p-6 flex flex-col items-center justify-center text-center">
-                 <svg class="w-8 h-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-                 <span class="text-sm text-gray-500">No active sessions</span>
-              </div>
-           </div>
-        </div>
-
-        <div class="flex-1">
-           <h3 class="flex items-center gap-2 mb-3 text-xs font-semibold text-gray-500 uppercase dark:text-gray-400">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-              Security Alerts
-           </h3>
-           <div id="alert-feed" class="flex flex-col gap-2">
-              <div class="p-6 flex flex-col items-center justify-center text-center">
-                 <svg class="w-8 h-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 2L3 7v5c0 5.25 3.75 10.14 9 11.43C17.25 22.14 21 17.25 21 12V7l-9-5z"/><path d="M9 12l2 2 4-4"/></svg>
-                 <span class="text-sm text-gray-500">No alerts detected</span>
-              </div>
-           </div>
-        </div>
-
-     </div>
-  </aside>
-
-  <!-- Main content -->
-  <main class="sm:ml-80 pt-16 h-screen relative">
-    <div id="graph-panel" class="relative w-full h-full bg-gray-50 dark:bg-gray-900 flex flex-col">
-      <!-- Toolbar -->
-      <div class="absolute top-4 left-4 z-20 flex gap-2">
-        <button id="btn-physics" onclick="togglePhysics()" class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 hover:text-primary-700 focus:z-10 focus:ring-2 focus:ring-primary-700 focus:text-primary-700 dark:bg-gray-800 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-700 dark:focus:ring-primary-500 dark:focus:text-white shadow-sm transition-all" data-tooltip-target="tooltip-physics">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><circle cx="5" cy="5" r="1.5"/><circle cx="19" cy="5" r="1.5"/><circle cx="5" cy="19" r="1.5"/><circle cx="19" cy="19" r="1.5"/><line x1="12" y1="10" x2="12" y2="7"/><line x1="10.5" y1="13" x2="6.5" y2="17.5"/><line x1="13.5" y1="13" x2="17.5" y2="17.5"/><line x1="7" y1="5" x2="17" y2="5"/></svg>
-          Auto Layout
-        </button>
-        <div id="tooltip-physics" role="tooltip" class="absolute z-30 invisible inline-block px-3 py-2 text-sm font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700">
-            Toggle automatic node physics
-            <div class="tooltip-arrow" data-popper-arrow></div>
-        </div>
-
-        <button id="btn-center" onclick="fitGraph()" class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 hover:text-primary-700 focus:z-10 focus:ring-2 focus:ring-primary-700 focus:text-primary-700 dark:bg-gray-800 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-700 dark:focus:ring-primary-500 dark:focus:text-white shadow-sm transition-all" data-tooltip-target="tooltip-center">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-          Center View
-        </button>
-        <div id="tooltip-center" role="tooltip" class="absolute z-30 invisible inline-block px-3 py-2 text-sm font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700">
-            Fit all nodes on canvas
-            <div class="tooltip-arrow" data-popper-arrow></div>
-        </div>
-
-        <button id="btn-hierarchical" onclick="toggleHierarchical()" class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 hover:text-primary-700 focus:z-10 focus:ring-2 focus:ring-primary-700 focus:text-primary-700 dark:bg-gray-800 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-700 dark:focus:ring-primary-500 dark:focus:text-white shadow-sm transition-all" data-tooltip-target="tooltip-hierarchical">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><rect x="2" y="18" width="6" height="4" rx="1"/><rect x="16" y="18" width="6" height="4" rx="1"/><line x1="12" y1="6" x2="12" y2="12"/><line x1="5" y1="18" x2="5" y2="12"/><line x1="19" y1="18" x2="19" y2="12"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Hierarchical
-        </button>
-        <div id="tooltip-hierarchical" role="tooltip" class="absolute z-30 invisible inline-block px-3 py-2 text-sm font-medium text-white transition-opacity duration-300 bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700">
-            Toggle top-down tree layout
-            <div class="tooltip-arrow" data-popper-arrow></div>
-        </div>
-      </div>
-
-      <!-- Graph Container -->
-      <div id="graph-container" class="absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_50%,rgba(99,102,241,0.05)_0%,transparent_70%)] w-full h-full">
-        <div id="graph-empty-state" class="flex flex-col items-center justify-center h-full text-center text-gray-500 dark:text-gray-400">
-          <svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="12" cy="12" r="2.5"/><line x1="8" y1="7" x2="10" y2="10.5"/><line x1="16" y1="7" x2="14" y2="10.5"/><line x1="14" y1="13.5" x2="16" y2="16.5"/><line x1="10" y1="13.5" x2="8" y2="16.5"/></svg>
-          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Session Provenance Graph</h2>
-          <p class="max-w-sm text-sm">Run a simulation or connect an MCP server to visualize taint propagation flows.</p>
-        </div>
-      </div>
-
-      <!-- Legend -->
-      <div id="graph-legend" class="absolute bottom-4 right-4 z-20 hidden flex-col gap-2 p-4 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg w-48">
-        <h4 class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest border-b border-gray-200 dark:border-gray-700 pb-2 mb-1">Legend</h4>
-        
-        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-1">Nodes</div>
-        <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"><span class="w-2.5 h-2.5 rounded-full bg-red-500 border border-red-600"></span>Tainted Source</div>
-        <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"><span class="w-2.5 h-2.5 rounded-full bg-orange-500 border border-orange-600"></span>Sensitive Sink</div>
-        <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"><span class="w-2.5 h-2.5 rounded-full bg-indigo-500 border border-indigo-600"></span>Neutral Tool</div>
-        <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"><span class="w-2.5 h-2.5 rounded-full bg-slate-700 border border-slate-600"></span>Clean / Unused</div>
-        
-        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-2">Flows</div>
-        <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"><span class="w-5 h-[2px] bg-purple-400"></span>Explicit</div>
-        <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"><span class="w-5 h-[2px] border-b-2 border-dashed border-orange-400"></span>Lexical</div>
-        <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"><span class="w-5 h-[2px] border-b-2 border-dotted border-green-500"></span>Semantic</div>
-      </div>
-    </div>
-  </main>
-
-  <!-- Connect Modal -->
-  <div id="mcp-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full backdrop-blur-sm bg-gray-900/50">
-      <div class="relative p-4 w-full max-w-md max-h-full">
-          <!-- Modal content -->
-          <div class="relative bg-white rounded-lg shadow dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-              <!-- Modal header -->
-              <div class="flex items-center justify-between p-4 md:p-5 border-b rounded-t dark:border-gray-700">
-                  <h3 class="text-xl font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6m-4-2v4m8-4v4"/><rect x="4" y="10" width="16" height="4" rx="1"/><path d="M9 14v4a3 3 0 0 0 6 0v-4"/></svg>
-                      Connect MCP Server
-                  </h3>
-                  <button type="button" class="end-2.5 text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm w-8 h-8 ms-auto inline-flex justify-center items-center dark:hover:bg-gray-600 dark:hover:text-white" data-modal-hide="mcp-modal" onclick="closeMcpModal()">
-                      <svg class="w-3 h-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14">
-                          <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"/>
-                      </svg>
-                      <span class="sr-only">Close modal</span>
-                  </button>
-              </div>
-              <!-- Modal body -->
-              <div class="p-4 md:p-5">
-                  <form class="space-y-4" action="#" onsubmit="connectMcp(); return false;">
-                      <div>
-                          <label for="mcp-name" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Server Name</label>
-                          <input type="text" name="mcp-name" id="mcp-name" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500" placeholder="my-mcp-server" required>
-                      </div>
-                      <div>
-                          <label for="mcp-url" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Server URL</label>
-                          <input type="text" name="mcp-url" id="mcp-url" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500" placeholder="http://localhost:3000" required>
-                      </div>
-                      <div>
-                          <label for="mcp-transport" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Transport Type</label>
-                          <select id="mcp-transport" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500">
-                            <option value="stdio">stdio</option>
-                            <option value="sse">sse</option>
-                            <option value="streamable-http">streamable-http</option>
-                          </select>
-                      </div>
-                      <div>
-                          <label for="mcp-token" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Auth Token <span class="text-gray-400 text-xs">(optional)</span></label>
-                          <input type="text" name="mcp-token" id="mcp-token" placeholder="Bearer token or API key" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500">
-                      </div>
-                      <p class="text-xs text-gray-500 dark:text-gray-400 flex gap-2"><svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg> Connect your MCP server to monitor tool calls in real-time. The tracker will intercept and analyze all tool execution events.</p>
-                      <button type="submit" id="btn-mcp-connect" class="w-full text-white bg-primary-700 hover:bg-primary-800 focus:ring-4 focus:outline-none focus:ring-primary-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-primary-600 dark:hover:bg-primary-700 dark:focus:ring-primary-800 flex items-center justify-center gap-2">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                          Connect
-                      </button>
-                  </form>
-                  
-                  <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
-                     <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Connected Servers</h4>
-                     <div id="connected-servers" class="flex flex-col gap-2">
-                        <div class="text-center py-4 text-xs text-gray-500 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
-                           No servers connected
-                        </div>
-                     </div>
-                  </div>
-              </div>
+  <!-- Sidebar & Main -->
+  <div class="flex flex-1 pt-16 h-full overflow-hidden">
+    
+    <!-- Left Sidebar: Metrics -->
+    <aside class="w-80 bg-surface border-r-[1.5px] border-outline flex flex-col shrink-0 overflow-y-auto">
+      
+      <!-- Metrics -->
+      <div class="p-5 shrink-0">
+        <h2 class="text-sm font-bold uppercase tracking-wider mb-4 text-muted">Metrics</h2>
+        <div class="grid grid-cols-2 gap-3 mb-6">
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-precision">
+            <div class="text-xs text-muted font-mono mb-1">Precision</div>
+            <div class="text-xl font-semibold" id="m-precision">-</div>
           </div>
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-recall">
+            <div class="text-xs text-muted font-mono mb-1">Recall</div>
+            <div class="text-xl font-semibold" id="m-recall">-</div>
+          </div>
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-f1">
+            <div class="text-xs text-muted font-mono mb-1">F1 Score</div>
+            <div class="text-xl font-semibold" id="m-f1">-</div>
+          </div>
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-fpr">
+            <div class="text-xs text-muted font-mono mb-1">FPR</div>
+            <div class="text-xl font-semibold" id="m-fpr">-</div>
+          </div>
+        </div>
+
+        <h3 class="text-xs font-bold text-muted uppercase tracking-wider mb-2">Runtime Overhead</h3>
+        <div class="grid grid-cols-2 gap-3 mb-6">
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-p50">
+            <div class="text-xs text-muted font-mono mb-1">P50 Lat</div>
+            <div class="text-xl font-semibold" id="m-p50">-</div>
+          </div>
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-p95">
+            <div class="text-xs text-muted font-mono mb-1">P95 Lat</div>
+            <div class="text-xl font-semibold" id="m-p95">-</div>
+          </div>
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-memory">
+            <div class="text-xs text-muted font-mono mb-1">Memory</div>
+            <div class="text-xl font-semibold" id="m-memory">-</div>
+          </div>
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-attr-cost">
+            <div class="text-xs text-muted font-mono mb-1">Attr Cost</div>
+            <div class="text-xl font-semibold" id="m-attr-cost">-</div>
+          </div>
+        </div>
+
+        <h3 class="text-xs font-bold text-muted uppercase tracking-wider mb-2">Flow Attribution</h3>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-expl">
+            <div class="text-xs text-muted font-mono mb-1">Explicit</div>
+            <div class="text-xl font-semibold" id="m-explicit">-</div>
+          </div>
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-lex">
+            <div class="text-xs text-muted font-mono mb-1">Lexical</div>
+            <div class="text-xl font-semibold" id="m-lexical">-</div>
+          </div>
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-sem">
+            <div class="text-xs text-muted font-mono mb-1">Semantic</div>
+            <div class="text-xl font-semibold" id="m-semantic">-</div>
+          </div>
+          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim" data-tooltip-target="tt-conf">
+            <div class="text-xs text-muted font-mono mb-1">Avg Conf</div>
+            <div class="text-xl font-semibold" id="m-confidence">-</div>
+          </div>
+        </div>
       </div>
+    </aside>
+
+    <!-- Main Content: Graph -->
+    <main class="relative flex-1 flex flex-col bg-dot-grid overflow-hidden">
+      <!-- Graph Toolbar -->
+      <div class="absolute top-4 left-4 z-10 flex gap-2">
+        <button id="btn-layout" class="px-3 py-1.5 rounded border-[1.5px] border-outline bg-surface hover:bg-surface-dim text-xs font-mono font-medium shadow-stack" onclick="toggleLayout()">Auto Layout: ON</button>
+        <button id="btn-center" class="px-3 py-1.5 rounded border-[1.5px] border-outline bg-surface hover:bg-surface-dim text-xs font-mono font-medium shadow-stack" onclick="centerGraph()">Center View</button>
+      </div>
+      
+      <!-- Graph Legend -->
+      <div class="absolute bottom-4 left-4 z-10 bg-surface border-[1.5px] border-outline rounded p-3 shadow-stack">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-muted mb-2">Flow Types</h4>
+        <div class="space-y-1.5 text-xs font-mono">
+            <div class="flex items-center gap-2"><span class="w-4 h-0.5 bg-[#a3a3a3]"></span> Explicit (Exact Match)</div>
+            <div class="flex items-center gap-2"><span class="w-4 h-0.5 bg-amber-500"></span> Lexical (Fuzzy Match)</div>
+            <div class="flex items-center gap-2"><span class="w-4 h-0.5 bg-red-500"></span> Semantic (LLM Embeddings)</div>
+        </div>
+      </div>
+      
+      <div id="graph-panel" class="absolute inset-0 w-full h-full"></div>
+    </main>
+
+    <!-- Right Sidebar: Sessions & Alerts -->
+    <aside class="w-80 bg-surface border-l-[1.5px] border-outline flex flex-col shrink-0 shadow-[-8px_0_32px_rgba(0,0,0,0.05)]">
+      
+      <!-- Sessions -->
+      <div class="p-4 border-b-[1.5px] border-outline">
+        <h2 class="text-sm font-bold uppercase tracking-wider text-muted">Sessions</h2>
+      </div>
+      <div class="max-h-64 overflow-y-auto p-4 space-y-3 border-b-[1.5px] border-outline" id="session-list"></div>
+
+      <!-- Live Alerts -->
+      <div class="flex-1 overflow-y-auto p-5 bg-surface-dim">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-muted">Alert Feed</h2>
+          <span class="flex h-2 w-2 relative">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-error opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-error"></span>
+          </span>
+        </div>
+        <div id="alert-feed" class="space-y-4"></div>
+      </div>
+    </aside>
   </div>
 
-  <!-- Rules Modal -->
-  <div id="rules-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full backdrop-blur-sm bg-gray-900/50">
-    <div class="relative p-4 w-full max-w-4xl max-h-full">
-      <div class="relative bg-white rounded-xl shadow dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-        <div class="flex items-center justify-between p-4 md:p-5 border-b rounded-t dark:border-gray-700">
-          <h3 class="text-xl font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-            Declarative Policy Engine
-          </h3>
-          <button type="button" class="text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm w-8 h-8 ms-auto inline-flex justify-center items-center dark:hover:bg-gray-600 dark:hover:text-white" data-modal-hide="rules-modal">
-            <svg class="w-3 h-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"/></svg>
-            <span class="sr-only">Close modal</span>
-          </button>
-        </div>
-        <div class="p-4 md:p-5 flex flex-col md:flex-row gap-4 h-[60vh]">
-          <div class="w-full md:w-1/3 flex flex-col gap-2">
-            <h4 class="text-sm font-medium text-gray-900 dark:text-white">Rules</h4>
-            <div id="rules-list-container" class="flex-1 overflow-y-auto custom-scrollbar border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900 p-2 space-y-2">
-              <!-- List of rules -->
+  <!-- YAML Rules Modal -->
+  <div id="rules-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full">
+    <div class="relative p-4 w-full max-w-5xl max-h-full">
+        <div class="relative bg-surface rounded-lg shadow-overlay border-[1.5px] border-outline flex flex-col h-[80vh]">
+            <div class="flex items-center justify-between p-4 md:p-5 border-b-[1.5px] border-outline rounded-t shrink-0">
+                <h3 class="text-xl font-bold tracking-tight">Declarative Policy Engine (YAML)</h3>
+                <div class="flex items-center gap-2">
+                    <button onclick="createNewRule()" class="px-4 py-2 text-sm font-semibold bg-surface border-[1.5px] border-outline rounded-full hover:bg-surface-dim shadow-stack transition-all">+ New Rule</button>
+                    <button type="button" class="text-outline-variant hover:text-primary rounded-lg text-sm w-8 h-8 inline-flex justify-center items-center" data-modal-hide="rules-modal">
+                        <svg class="w-3 h-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"/></svg>
+                    </button>
+                </div>
             </div>
-            <button onclick="createNewRule()" type="button" class="w-full text-gray-900 bg-white border border-gray-300 hover:bg-gray-100 font-medium rounded-lg text-sm px-4 py-2 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:hover:bg-gray-700">
-              + New Rule
-            </button>
-          </div>
-          <div class="w-full md:w-2/3 flex flex-col gap-2">
-            <div class="flex justify-between items-center">
-              <h4 class="text-sm font-medium text-gray-900 dark:text-white">Editor</h4>
-              <button onclick="saveActiveRule()" type="button" class="text-white bg-blue-700 hover:bg-blue-800 font-medium rounded-lg text-xs px-3 py-1.5 dark:bg-blue-600 dark:hover:bg-blue-700">
-                Save & Compile
-              </button>
+            <div class="flex flex-1 min-h-0">
+                <!-- Rules List -->
+                <div class="w-1/3 border-r-[1.5px] border-outline bg-surface-dim overflow-y-auto p-4 space-y-2" id="rules-list"></div>
+                <!-- Editor -->
+                <div class="w-2/3 flex flex-col bg-surface">
+                    <div class="flex items-center justify-between p-3 border-b-[1.5px] border-outline shrink-0 bg-surface-dim">
+                        <span id="rule-filename-display" class="text-sm font-mono font-bold text-muted">Select a rule...</span>
+                    </div>
+                    <div class="flex-1 p-0 relative">
+                        <textarea id="rule-editor" class="absolute inset-0 w-full h-full p-4 font-mono text-sm bg-black text-[#a6e22e] border-0 focus:ring-0 resize-none outline-none" spellcheck="false"></textarea>
+                    </div>
+                    <div class="p-4 border-t-[1.5px] border-outline flex justify-end shrink-0">
+                        <button id="btn-save-rule" onclick="saveCurrentRule()" class="hidden px-5 py-2 text-sm font-semibold bg-primary text-primary-on border-[1.5px] border-outline rounded-full hover:bg-secondary hover:text-secondary-on shadow-stack transition-all">Save & Compile Cypher</button>
+                    </div>
+                </div>
             </div>
-            <input type="text" id="rule-filename" placeholder="filename.yaml" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500" />
-            <textarea id="rule-editor" class="flex-1 p-3 font-mono text-sm text-gray-800 bg-gray-50 rounded-lg border border-gray-300 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700 focus:ring-blue-500 focus:border-blue-500 custom-scrollbar resize-none" placeholder="Write YAML rule here..."></textarea>
-          </div>
         </div>
-      </div>
     </div>
   </div>
 
-  <div id="toast-container" class="fixed top-20 right-5 z-[9999] flex flex-col gap-3"></div>
+  <!-- Alert Details Modal -->
+  <div id="alert-details-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full">
+    <div class="relative p-4 w-full max-w-3xl max-h-full">
+        <div class="relative bg-surface rounded-lg shadow-overlay border-[1.5px] border-outline">
+            <div class="flex items-center justify-between p-4 md:p-5 border-b-[1.5px] border-outline rounded-t">
+                <h3 class="text-xl font-bold tracking-tight">Alert Details</h3>
+                <button type="button" class="text-outline-variant hover:text-primary rounded-lg text-sm w-8 h-8 inline-flex justify-center items-center" data-modal-hide="alert-details-modal">
+                    <svg class="w-3 h-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"/></svg>
+                </button>
+            </div>
+            <div class="p-6 space-y-6" id="alert-details-content"></div>
+        </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
+  
+  <!-- Tooltips -->
+  <div id="tt-precision" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">True Positives / (True Positives + False Positives)<div class="tooltip-arrow" data-popper-arrow></div></div>
+  <div id="tt-recall" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">True Positives / (True Positives + False Negatives)<div class="tooltip-arrow" data-popper-arrow></div></div>
+  <div id="tt-f1" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">Harmonic mean of Precision and Recall<div class="tooltip-arrow" data-popper-arrow></div></div>
+  <div id="tt-fpr" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">False Positives / (False Positives + True Negatives)<div class="tooltip-arrow" data-popper-arrow></div></div>
+  
+  <div id="tt-p50" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">Median Latency<div class="tooltip-arrow" data-popper-arrow></div></div>
+  <div id="tt-p95" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">95th Percentile Latency<div class="tooltip-arrow" data-popper-arrow></div></div>
+  <div id="tt-memory" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">Peak memory consumed by backend<div class="tooltip-arrow" data-popper-arrow></div></div>
+  <div id="tt-attr-cost" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">Percentage of latency spent in flow attribution<div class="tooltip-arrow" data-popper-arrow></div></div>
+
+  <div id="tt-expl" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">Flows matched via exact token matching<div class="tooltip-arrow" data-popper-arrow></div></div>
+  <div id="tt-lex" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">Flows matched via fuzzy lexical matching<div class="tooltip-arrow" data-popper-arrow></div></div>
+  <div id="tt-sem" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">Flows matched via semantic similarity (LLM embeddings)<div class="tooltip-arrow" data-popper-arrow></div></div>
+  <div id="tt-conf" role="tooltip" class="absolute z-10 invisible inline-block px-3 py-2 text-xs font-mono text-white bg-black rounded shadow-sm opacity-0 tooltip">Average confidence of matched flows<div class="tooltip-arrow" data-popper-arrow></div></div>
+
+  <!-- Connect MCP Modal -->
+  <div id="connect-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full">
+    <div class="relative p-4 w-full max-w-md max-h-full">
+        <div class="relative bg-surface rounded-lg shadow-overlay border-[1.5px] border-outline">
+            <div class="flex items-center justify-between p-4 md:p-5 border-b-[1.5px] border-outline rounded-t">
+                <h3 class="text-xl font-bold tracking-tight">Connect MCP Server</h3>
+                <button type="button" class="text-outline-variant hover:text-primary rounded-lg text-sm w-8 h-8 inline-flex justify-center items-center" data-modal-hide="connect-modal">
+                    <svg class="w-3 h-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"/></svg>
+                </button>
+            </div>
+            <div class="p-4 md:p-5">
+                <form class="space-y-4" action="#">
+                    <div>
+                        <label class="block mb-2 text-sm font-semibold">Server Command</label>
+                        <input type="text" id="mcp-command" class="bg-surface border-[1.5px] border-outline text-primary text-sm rounded-lg focus:ring-black focus:border-black block w-full p-2.5 font-mono" placeholder="npx -y @server/filesystem" required />
+                    </div>
+                    <div>
+                        <label class="block mb-2 text-sm font-semibold">Environment Variables (JSON)</label>
+                        <textarea id="mcp-env" rows="3" class="bg-surface border-[1.5px] border-outline text-primary text-sm rounded-lg focus:ring-black focus:border-black block w-full p-2.5 font-mono" placeholder='{"API_KEY": "..."}'></textarea>
+                    </div>
+                    <button type="button" class="w-full text-primary-on bg-primary hover:bg-secondary focus:ring-4 focus:outline-none focus:ring-secondary/50 font-semibold rounded-full text-sm px-5 py-2.5 text-center shadow-stack border-[1.5px] border-outline transition-all" onclick="connectMcpServer()">Connect & Monitor</button>
+                </form>
+            </div>
+        </div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
   <script src="/static/dashboard.js"></script>

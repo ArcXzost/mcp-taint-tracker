@@ -1,0 +1,10 @@
+name: "Indirect Prompt Injection"
+severity: "HIGH"
+pattern:
+  source:
+    tools: ["read_emails", "webhook"]
+  path:
+    max_hops: 3
+    requires_taint: true
+  sink:
+    tools: ["webhook"]

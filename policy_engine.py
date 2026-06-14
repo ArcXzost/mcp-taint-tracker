@@ -65,8 +65,27 @@ class PolicyEngine:
     """
     def __init__(self, rules_dir: str = "rules"):
         self.rules: List[DeclarativeRule] = []
+        self.rule_thresholds = {}
+        self.global_threshold = 0.50
         self._load_rules(rules_dir)
+        self.reload_thresholds()
         
+    def reload_thresholds(self):
+        """Load optimized rule thresholds from learning pipeline."""
+        if os.path.exists("optimized_thresholds.json"):
+            try:
+                with open("optimized_thresholds.json", "r") as f:
+                    opt = json.load(f)
+                    if "_global" in opt:
+                        self.global_threshold = opt["_global"].get("semantic_threshold", 0.50)
+                    if "rules" in opt:
+                        self.rule_thresholds = {
+                            k: v.get("semantic_threshold", self.global_threshold) 
+                            for k, v in opt["rules"].items()
+                        }
+            except Exception as e:
+                logger.error(f"Failed to load optimized thresholds: {e}")
+
     def load_rules_from_directory(self, rules_dir: str = "rules"):
         self.rules = []
         self._load_rules(rules_dir)
@@ -128,13 +147,24 @@ class PolicyEngine:
                         if num_edges > 1:
                             confidence *= (0.9 ** (num_edges - 1))
                             
+                        # Check against Rule-Specific threshold
+                        rule_thresh = self.rule_thresholds.get(rule.name, self.global_threshold)
+                        if confidence < rule_thresh:
+                            continue
+                            
+                        import hashlib
+                        path_hash = hashlib.md5(f"{rule.name}-{src_id}-{sink_id}".encode()).hexdigest()
+                        
                         alert_key = (src_id, sink_id, rule.name)
                         new_alert = Alert(
+                            alert_id=path_hash,
                             violation=rule.name,
                             severity=rule.severity,
                             rule=f"Matched YAML Rule: {rule.name}",
                             source_node=src_tool,
                             sink_node=sink_tool,
+                            source_call_id=src_id,
+                            sink_call_id=sink_id,
                             path=path_names,
                             confidence=round(confidence, 3),
                             evidence=" -> ".join(evidence_chain)
@@ -184,13 +214,23 @@ class PolicyEngine:
                 if num_edges > 1:
                     confidence *= (0.9 ** (num_edges - 1))
 
+                rule_thresh = self.rule_thresholds.get(rule.name, self.global_threshold)
+                if confidence < rule_thresh:
+                    continue
+
+                import hashlib
+                path_hash = hashlib.md5(f"{rule.name}-{source_node.call_id}-{sink_node.call_id}".encode()).hexdigest()
+
                 alert_key = (source_node.call_id, sink_node.call_id, rule.name)
                 new_alert = Alert(
+                    alert_id=path_hash,
                     violation=rule.name,
                     severity=rule.severity,
                     rule=f"Matched YAML Rule: {rule.name}",
                     source_node=source_node.tool_name,
                     sink_node=sink_node.tool_name,
+                    source_call_id=source_node.call_id,
+                    sink_call_id=sink_node.call_id,
                     path=[session_graph.nodes_data[cid].tool_name for cid in path],
                     confidence=round(confidence, 3),
                     evidence=" -> ".join(evidence_chain),
