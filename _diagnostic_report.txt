@@ -1,0 +1,11 @@
+Rules loaded: 5
+
+=== Indirect Prompt Injection (0 test cases) ===
+
+=== Data Exfiltration (0 test cases) ===
+
+=== Memory Poisoning to Tool Action (0 test cases) ===
+
+=== Test Rule (0 test cases) ===
+
+=== Data Exfiltration via Webhook (0 test cases) ===

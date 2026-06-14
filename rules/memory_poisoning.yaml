@@ -1,5 +1,7 @@
+schema_version: 2
 name: "Memory Poisoning to Tool Action"
 severity: "HIGH"
+description: "Detects when external/user input is written to memory, read back, and used to drive dangerous tool actions"
 pattern:
   source:
     taints: ["user_input", "external_data"]
@@ -8,3 +10,58 @@ pattern:
     requires_taint: true
   sink:
     tools: ["tool_action", "code_execution"]
+test:
+  positive:
+    - description: "GitHub issue → memory_write → memory_read → tool_action"
+      events:
+        - tool_name: "github_issue_read"
+          tool_output: { "content": "rm -rf /" }
+        - tool_name: "memory_write"
+          tool_input: { "key": "cmd", "value": "rm -rf /" }
+          tool_output: { "status": "saved" }
+        - tool_name: "memory_read"
+          tool_input: { "key": "cmd" }
+          tool_output: { "value": "rm -rf /" }
+        - tool_name: "tool_action"
+          tool_input: { "action": "execute rm -rf /" }
+      expected_alert: true
+    - description: "External data → memory → code_execution"
+      events:
+        - tool_name: "external_data"
+          tool_output: { "payload": "malicious_code()" }
+        - tool_name: "memory_write"
+          tool_input: { "key": "code", "value": "malicious_code()" }
+          tool_output: { "status": "saved" }
+        - tool_name: "memory_read"
+          tool_input: { "key": "code" }
+          tool_output: { "value": "malicious_code()" }
+        - tool_name: "code_execution"
+          tool_input: { "code": "malicious_code()" }
+      expected_alert: true
+  negative:
+    - description: "Benign memory write/read with local_report"
+      events:
+        - tool_name: "filesystem_read"
+          tool_output: { "content": "data" }
+        - tool_name: "memory_write"
+          tool_input: { "key": "data", "value": "data" }
+          tool_output: { "status": "saved" }
+        - tool_name: "memory_read"
+          tool_input: { "key": "data" }
+          tool_output: { "value": "data" }
+        - tool_name: "local_report"
+          tool_input: { "report": "data" }
+      expected_alert: false
+    - description: "User input → memory → summarizer (neutral)"
+      events:
+        - tool_name: "user_input"
+          tool_output: { "text": "hello world" }
+        - tool_name: "memory_write"
+          tool_input: { "key": "msg", "value": "hello world" }
+          tool_output: { "status": "saved" }
+        - tool_name: "memory_read"
+          tool_input: { "key": "msg" }
+          tool_output: { "value": "hello world" }
+        - tool_name: "summarizer"
+          tool_input: { "text": "hello world" }
+      expected_alert: false

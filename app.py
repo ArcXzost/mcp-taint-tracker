@@ -10,37 +10,26 @@ Launch with:
 """
 
 import os
+import json
+import re
 import time
+import hashlib
 import logging
 from typing import Dict, Any, List, Optional
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from schema import Event, Alert, Severity
 from mcp_interception_layer import MCPInterceptor
-from session_graph import SessionGraph
+from mcp_gateway import register_mcp_routes
 import logging
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-try:
-    from neo4j_graph import Neo4jSessionGraph
-    # Test connection to see if docker is running
-    _test = Neo4jSessionGraph()
-    _test._setup_db()
-    # If _setup_db succeeded without error, or we can ping...
-    # Actually _setup_db catches exceptions. Let's do a direct ping.
-    _test.driver.verify_connectivity()
-    _test.close()
-    NEO4J_AVAILABLE = True
-except Exception as e:
-    logger.warning(f"Neo4j is not available (Docker not running?): {e}. Falling back to NetworkX.")
-    NEO4J_AVAILABLE = False
+from neo4j_graph import Neo4jSessionGraph
 from flow_attribution import FlowAttributionEngine
 from policy_engine import PolicyEngine
 from taint_engine import TaintSourceEngine
@@ -58,11 +47,10 @@ policy_engine = PolicyEngine()
 
 # Per-session stores
 session_interceptors: Dict[str, MCPInterceptor] = {}
-session_graphs: Dict[str, SessionGraph] = {}
+session_graphs: Dict[str, Neo4jSessionGraph] = {}
 session_alerts: Dict[str, List[Alert]] = {}
 
 
-@asynccontextmanager
 async def lifespan(app: FastAPI):
     """Pre-load the sentence transformer model at startup and connect Kafka."""
     global flow_engine
@@ -71,7 +59,8 @@ async def lifespan(app: FastAPI):
     GLOBAL_METRICS.start_memory_tracking()
     
     logger.info("Connecting to Kafka...")
-    await streaming_client.connect_producer()
+    if not await streaming_client.connect_producer():
+        raise RuntimeError("Failed to connect to Kafka Producer. Kafka is required.")
     await streaming_client.start_consumer(process_kafka_message)
     
     logger.info("Engine ready.")
@@ -92,6 +81,9 @@ app = FastAPI(
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# Register MCP Streamable HTTP gateway for n8n integration
+register_mcp_routes(app)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -133,8 +125,8 @@ class GraphEdge(BaseModel):
     confidence: float
     method: str = "unknown"
     evidence: str = ""
-    edge_type: str
-    evidence: str
+    edge_type: str = "unknown"
+    in_alert_path: bool = False
 
     model_config = {"populate_by_name": True}
 
@@ -162,12 +154,7 @@ class SessionSummary(BaseModel):
 def _ensure_session(session_id: str) -> None:
     """Initialize session stores if the session doesn't exist yet."""
     if session_id not in session_graphs:
-        # Create graphs first to ensure they don't fail, then add interceptor
-        if NEO4J_AVAILABLE:
-            session_graphs[session_id] = Neo4jSessionGraph(flow_engine=flow_engine)
-        else:
-            session_graphs[session_id] = SessionGraph(flow_engine=flow_engine)
-        
+        session_graphs[session_id] = Neo4jSessionGraph(flow_engine=flow_engine)
         session_interceptors[session_id] = MCPInterceptor(session_id=session_id)
         session_alerts[session_id] = []
 
@@ -197,12 +184,13 @@ async def list_sessions():
         interceptor = session_interceptors[sid]
         graph = session_graphs[sid]
         alerts = session_alerts.get(sid, [])
+        resp = graph.get_graph_response(sid)
         summaries.append(SessionSummary(
             session_id=sid,
             event_count=len(interceptor.events),
             alert_count=len(alerts),
-            node_count=len(graph.graph.nodes) if hasattr(graph, 'graph') else len(interceptor.events),
-            edge_count=len(graph.graph.edges) if hasattr(graph, 'graph') else 0,
+            node_count=len(resp.get("nodes", [])),
+            edge_count=len(resp.get("edges", [])),
         ))
     return summaries
 
@@ -256,9 +244,7 @@ async def process_kafka_message(msg: Dict[str, Any]):
 @app.post("/api/sessions/{session_id}/events", response_model=EventResponse)
 async def ingest_event(session_id: str, req: EventRequest):
     """
-    Ingest a new MCP tool call event into a session.
-    If Kafka is connected, publishes to 'mcp-events' for async processing.
-    Otherwise, processes inline.
+    Ingest a new MCP tool call event into a session via Kafka.
     """
     _ensure_session(session_id)
 
@@ -270,25 +256,16 @@ async def ingest_event(session_id: str, req: EventRequest):
         "tool_output": req.tool_output,
     }
 
-    if streaming_client.is_connected:
-        await streaming_client.produce_event(session_id, msg)
-        return EventResponse(
-            call_id="async-queued",
-            session_id=session_id,
-            alerts_triggered=0,
-            alerts=[]
-        )
-    else:
-        # Fallback to synchronous inline processing
-        await process_kafka_message(msg)
-        
-        alerts = session_alerts.get(session_id, [])
-        return EventResponse(
-            call_id="sync-processed",
-            session_id=session_id,
-            alerts_triggered=len(alerts),
-            alerts=alerts,
-        )
+    await streaming_client.produce_event(session_id, msg)
+    logger.debug("Event queued to Kafka for session %s", session_id)
+
+    alerts = session_alerts.get(session_id, [])
+    return EventResponse(
+        call_id="async-queued",
+        session_id=session_id,
+        alerts_triggered=len(alerts),
+        alerts=alerts,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -302,35 +279,30 @@ async def get_session_graph(session_id: str):
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
 
     graph = session_graphs[session_id]
+
+    # Collect edges that are part of alert paths (call_id pairs)
+    alert_edge_pairs = set()
+    if session_id in session_alerts:
+        for alert in session_alerts[session_id]:
+            call_ids = alert.path_call_ids
+            for i in range(len(call_ids) - 1):
+                alert_edge_pairs.add((call_ids[i], call_ids[i+1]))
     
     if hasattr(graph, 'get_graph_response'):
-        return graph.get_graph_response(session_id)
-    
-    # Fallback for old SessionGraph
-    nodes = []
-    for node_id, data in getattr(graph, 'graph', nx.DiGraph()).nodes(data=True):
-        tool_name = data.get("tool_name", "unknown")
-        nodes.append(GraphNode(
-            id=node_id,
-            label=tool_name,
-            tool_name=tool_name,
-            server_name=data.get("server_name", "local"),
-            taint_labels=data.get("taint_labels", []),
-            is_source=len(TaintSourceEngine.get_sources(tool_name)) > 0,
-            is_sink=len(TaintSourceEngine.get_sinks(tool_name)) > 0,
-            is_neutral=TaintSourceEngine.is_neutral(tool_name),
-        ))
+        # Neo4j graph - get response (returns dict) and filter edges
+        resp = graph.get_graph_response(session_id)
+        if alert_edge_pairs:
+            resp["edges"] = [
+                e for e in resp.get("edges", [])
+                if (e.get("from", e.get("from_")), e.get("to")) in alert_edge_pairs
+            ]
+            for e in resp["edges"]:
+                e["in_alert_path"] = True
+        else:
+            resp["edges"] = []
+        return resp
 
-    edges = []
-    for u, v, data in getattr(graph, 'graph', nx.DiGraph()).edges(data=True):
-        edges.append(GraphEdge(
-            **{"from": u, "to": v},
-            confidence=data.get("confidence", 0.0),
-            edge_type=data.get("edge_type", "unknown"),
-            evidence=data.get("evidence", ""),
-        ))
-
-    return GraphResponse(session_id=session_id, nodes=nodes, edges=edges)
+    return GraphResponse(session_id=session_id, nodes=[], edges=[])
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -341,14 +313,26 @@ async def get_session_graph(session_id: str):
 async def get_session_alerts(session_id: str):
     """Retrieve all alerts for a session."""
     if session_id not in session_alerts:
-        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+        return []
     return session_alerts[session_id]
+
+
+@app.get("/api/sessions/{session_id}/schema-mutations")
+async def get_schema_mutations(session_id: str):
+    """Retrieve schema mutation detections for a session (rug pull attacks)."""
+    if session_id not in session_graphs:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+    graph = session_graphs[session_id]
+    if hasattr(graph, 'schema_mutations'):
+        return {"session_id": session_id, "mutations": graph.schema_mutations}
+    return {"session_id": session_id, "mutations": []}
 
 
 class TriageRequest(BaseModel):
     label: str  # 'tp' or 'fp'
 
 import csv
+from schema import FP_BUDGETS
 
 @app.post("/api/alerts/{session_id}/{alert_id}/triage")
 async def triage_alert(session_id: str, alert_id: str, req: TriageRequest):
@@ -364,21 +348,26 @@ async def triage_alert(session_id: str, alert_id: str, req: TriageRequest):
             # If changing label, revert previous
             if alert.triage_status == "tp":
                 GLOBAL_METRICS.tp -= 1
+                _update_rule_efficacy(alert.rule, "tp", revert=True)
             elif alert.triage_status == "fp":
                 GLOBAL_METRICS.fp -= 1
+                _update_rule_efficacy(alert.rule, "fp", revert=True)
                 
             alert.triage_status = req.label
             
             if req.label == "tp":
                 GLOBAL_METRICS.tp += 1
+                _update_rule_efficacy(alert.rule, "tp")
             else:
                 GLOBAL_METRICS.fp += 1
+                _update_rule_efficacy(alert.rule, "fp")
+                FP_BUDGETS.record_fp(alert.rule)
                 
             # --- LEARNING PIPELINE: Save to Truth Matrix ---
             csv_path = "truth_matrix.csv"
             file_exists = os.path.isfile(csv_path)
             
-            # Determine method based on evidence string (hacky but works without refactoring graph)
+            # Determine method based on evidence string
             method = "explicit"
             if "[semantic]" in alert.evidence: method = "semantic"
             elif "[lexical]" in alert.evidence: method = "lexical"
@@ -397,21 +386,40 @@ async def triage_alert(session_id: str, alert_id: str, req: TriageRequest):
                     1 if req.label == "tp" else 0
                 ])
 
-            return {"status": "ok"}
+            # Auto-demote rule if FP budget exceeded
+            demoted = policy_engine.auto_demote_rules()
+            
+            return {"status": "ok", "auto_demoted": demoted}
             
             raise HTTPException(status_code=404, detail="Alert not found")
 
 
+def _update_rule_efficacy(rule_name: str, label: str, revert: bool = False):
+    """Update rule-level efficacy tracking counts."""
+    for rule in policy_engine.rules:
+        if f"Matched YAML Rule: {rule.name}" == rule_name or rule.name in rule_name:
+            delta = -1 if revert else 1
+            if label == "tp":
+                rule.efficacy.true_positives += delta
+            elif label == "fp":
+                rule.efficacy.false_positives += delta
+            rule.efficacy.invocations += delta
+            break
+
+
 @app.post("/api/learn")
-async def run_learning_pipeline():
+async def run_learning_pipeline(shadow: bool = False):
     """Execute the offline learning pipeline to optimize attribution thresholds."""
     import subprocess
     import json
     import os
     
     try:
-        # Run the pipeline script
-        subprocess.run(["python", "learning_pipeline.py"], check=True, capture_output=True, text=True)
+        # Run the pipeline script with optional shadow mode
+        cmd = ["python", "learning_pipeline.py"]
+        if shadow:
+            cmd.append("--shadow")
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         
         # Read the new thresholds
         thresh_file = "optimized_thresholds.json"
@@ -419,13 +427,56 @@ async def run_learning_pipeline():
             with open(thresh_file, "r") as f:
                 opt = json.load(f)
                 
-            # Hot-reload into the policy engine!
-            policy_engine.reload_thresholds()
+            if not shadow:
+                # Hot-reload into the policy engine!
+                policy_engine.reload_thresholds()
             
-            return {"status": "ok", "message": "Learning pipeline executed successfully", "thresholds": opt}
+            return {
+                "status": "ok",
+                "message": "Learning pipeline executed successfully",
+                "shadow_mode": shadow,
+                "thresholds": opt.get("_global", {}),
+                "rules_optimized": len(opt.get("rules", {})),
+                "total_samples": opt.get("metadata", {}).get("total_samples", 0),
+                "explanations": opt.get("metadata", {}).get("explanations", []),
+            }
         return {"status": "ok", "message": "Learning pipeline ran but no thresholds generated (insufficient data)."}
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"Learning pipeline failed: {e.stderr}")
+
+
+@app.get("/api/learn/status")
+async def learning_status():
+    """Return the current learning pipeline status and threshold history."""
+    history_file = "threshold_history.json"
+    thresh_file = "optimized_thresholds.json"
+    
+    status = {
+        "data_available": os.path.exists("truth_matrix.csv"),
+        "thresholds_deployed": os.path.exists(thresh_file),
+        "history_available": os.path.exists(history_file),
+        "truth_matrix_count": 0,
+        "latest_run": None,
+        "history_summary": [],
+    }
+    
+    if status["data_available"]:
+        with open("truth_matrix.csv") as f:
+            status["truth_matrix_count"] = sum(1 for _ in f) - 1  # Subtract header
+    
+    if status["thresholds_deployed"]:
+        with open(thresh_file) as f:
+            status["latest_run"] = json.load(f)
+    
+    if status["history_available"]:
+        with open(history_file) as f:
+            history = json.load(f)
+            status["history_summary"] = [
+                {"timestamp": h["timestamp"], "datetime": h.get("datetime", "unknown")}
+                for h in history.get("history", [])
+            ]
+    
+    return status
 
 
 
@@ -440,16 +491,132 @@ class ConfigRequest(BaseModel):
 
 @app.get("/api/rules")
 async def get_rules():
-    """Return all currently loaded YAML rules."""
-    rules = []
+    """Return all currently loaded YAML rules with efficacy data."""
+    rules = [rule.to_dict() for rule in policy_engine.rules]
+    return {"rules": rules, "efficacy_summary": policy_engine.get_efficacy_summary()}
+
+
+@app.get("/api/rules/validate")
+async def validate_rules():
+    """Run schema validation on all loaded rules."""
+    issues = policy_engine.validate_all_rules()
+    return {"status": "ok", "issues": issues, "count": len(issues)}
+
+
+@app.post("/api/rules/test")
+async def test_rules():
+    """Run all built-in test cases for all rules and pipe results into sessions/alerts/graph."""
+    results = policy_engine.run_tests()
+    passed = sum(1 for r in results if r.get("status") == "passed")
+    failed = sum(1 for r in results if r.get("status") == "failed")
+
+    # Pipe each test case through the real pipeline so sessions/alerts/graph get populated
     for rule in policy_engine.rules:
-        rules.append({
-            "filename": getattr(rule, "filename", "unknown.yaml"),
-            "name": rule.name,
-            "severity": rule.severity,
-            "raw_yaml": getattr(rule, "raw_yaml", "")
-        })
-    return {"rules": rules}
+        if not rule.test_cases:
+            continue
+        for idx, tc in enumerate(rule.test_cases):
+            safe_name = re.sub(r'[^a-zA-Z0-9]', '_', rule.name.lower())
+            session_id = f"test-{safe_name}-{idx}"
+            _ensure_session(session_id)
+            for evt in tc.events:
+                msg = {
+                    "session_id": session_id,
+                    "tool_name": evt.get("tool_name", "unknown"),
+                    "server_name": evt.get("server_name", "test"),
+                    "tool_input": evt.get("tool_input", {}),
+                    "tool_output": evt.get("tool_output", {}),
+                }
+                await process_kafka_message(msg)
+
+    return {"status": "ok", "results": results, "passed": passed, "failed": failed}
+
+
+@app.get("/api/rules/test/stream")
+async def test_rules_stream(request: Request):
+    """SSE endpoint: runs YAML tests incrementally, populating sessions/alerts/graph in real-time."""
+
+    async def event_stream():
+        total = sum(len(r.test_cases) for r in policy_engine.rules)
+        yield f"event: test_start\ndata: {json.dumps({'total': total})}\n\n"
+
+        passed = 0
+        failed = 0
+
+        for rule in policy_engine.rules:
+            if not rule.test_cases:
+                continue
+            for idx, tc in enumerate(rule.test_cases):
+                if await request.is_disconnected():
+                    yield f"event: test_aborted\ndata: {json.dumps({'passed': passed, 'failed': failed})}\n\n"
+                    return
+
+                safe_name = re.sub(r'[^a-zA-Z0-9]', '_', rule.name.lower())
+                test_sid = f"test-{safe_name}-{idx}-{hashlib.md5(tc.description.encode()).hexdigest()[:8]}"
+
+                # Step 1: Run YAML pattern test against this single rule
+                pattern_status = "passed"
+                try:
+                    test_graph = Neo4jSessionGraph(flow_engine=None)
+                    test_graph.flow_engine = FlowAttributionEngine()
+                    for evt in tc.events:
+                        event = Event(
+                            call_id=hashlib.md5(f"{evt.get('tool_name')}-{test_sid}-{time.time()}".encode()).hexdigest()[:12],
+                            session_id=test_sid,
+                            tool_name=evt.get("tool_name", "unknown"),
+                            server_name=evt.get("server_name", "test"),
+                            tool_input=evt.get("tool_input", {}),
+                            tool_output=evt.get("tool_output", {}),
+                            timestamp=time.time(),
+                        )
+                        test_graph.add_event(event)
+                    old_rules = policy_engine.rules[:]
+                    policy_engine.rules = [rule]
+                    alerts = policy_engine._evaluate_neo4j(test_graph, session_id=test_sid)
+                    policy_engine.rules = old_rules
+                    has_alert = len(alerts) > 0
+                    if has_alert != tc.expected_alert:
+                        pattern_status = "failed"
+                        failed += 1
+                    else:
+                        pattern_status = "passed"
+                        passed += 1
+                except Exception:
+                    pattern_status = "error"
+                    failed += 1
+
+                # Step 2: Pipe through real pipeline to populate sessions/alerts/graph
+                session_id = f"test-{safe_name}-{idx}"
+                _ensure_session(session_id)
+                for evt in tc.events:
+                    msg = {
+                        "session_id": session_id,
+                        "tool_name": evt.get("tool_name", "unknown"),
+                        "server_name": evt.get("server_name", "test"),
+                        "tool_input": evt.get("tool_input", {}),
+                        "tool_output": evt.get("tool_output", {}),
+                    }
+                    await process_kafka_message(msg)
+
+                alert_count = len(session_alerts.get(session_id, []))
+
+                yield f"event: test_progress\ndata: {json.dumps({'rule': rule.name, 'test': tc.description, 'pattern_status': pattern_status, 'expected_alert': tc.expected_alert, 'alert_count': alert_count, 'session_id': session_id})}\n\n"
+
+        yield f"event: test_done\ndata: {json.dumps({'passed': passed, 'failed': failed})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/rules/auto-demote")
+async def auto_demote_rules():
+    """Demote rules exceeding FP budget."""
+    demoted = policy_engine.auto_demote_rules()
+    return {"status": "ok", "demoted": demoted, "count": len(demoted)}
+
+
+@app.get("/api/rules/efficacy")
+async def rule_efficacy():
+    """Return aggregate and per-rule efficacy metrics."""
+    return policy_engine.get_efficacy_summary()
 
 class RuleUpdate(BaseModel):
     yaml_content: str
@@ -478,15 +645,41 @@ async def reload_rules():
 
 @app.get("/api/config")
 async def get_config():
-    """Get the active tiers configuration."""
+    """Get the active tiers configuration with full tier system info."""
     from flow_attribution import FlowAttributionEngine
-    # The flow engine is stored in the graph, but all graphs share the same defaults in our setup, 
-    # so we'll just check the current graph's engine
-    if not session_graphs:
-        return {"explicit": True, "lexical": True, "semantic": True}
+    from schema import DEFAULT_TIERS, FP_BUDGETS
     
-    first_graph = next(iter(session_graphs.values()))
-    return first_graph.flow_engine.active_tiers
+    flow_tiers = {"explicit": True, "lexical": True, "semantic": True}
+    if session_graphs:
+        first_graph = next(iter(session_graphs.values()))
+        flow_tiers = first_graph.flow_engine.active_tiers
+    
+    def _to_json_safe(v):
+        if v == float('inf'):
+            return None
+        return v
+    
+    return {
+        "flow_engine_tiers": flow_tiers,
+        "detection_tiers": {
+            name: {
+                "label": config.name,
+                "min_efficacy": config.min_efficacy,
+                "max_fp_budget_minutes": _to_json_safe(config.max_fp_budget_minutes),
+                "min_mitre_coverage": config.min_mitre_coverage,
+                "action": config.action.value,
+                "pager_duty": config.pager_duty,
+            }
+            for name, config in DEFAULT_TIERS.items()
+        },
+        "fp_budget": {
+            "per_rule": {
+                rule: round(FP_BUDGETS.current_fp_budget_minutes(rule), 1)
+                for rule in FP_BUDGETS.fp_counts
+            },
+            "analyst_cost_per_fp_minutes": 5,
+        }
+    }
 
 class TierToggleRequest(BaseModel):
     tier: str
@@ -592,6 +785,97 @@ async def unregister_mcp_server(server_name: str):
             logger.info("Unregistered MCP server: %s", server_name)
             return {"status": "disconnected", "message": f"Server '{server_name}' removed."}
     raise HTTPException(status_code=404, detail=f"Server '{server_name}' not found.")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Routes — Systems (System-level monitoring onboarding)
+# ═══════════════════════════════════════════════════════════════════════
+
+class MCPServerEntry(BaseModel):
+    name: str
+    url: str
+    transport: str = "stdio"
+    token: Optional[str] = None
+
+class SystemRegistration(BaseModel):
+    name: str
+    description: str = ""
+    environment: str = "development"  # development | staging | production
+    ip_domain: str = ""
+    servers: List[MCPServerEntry] = []
+
+# In-memory systems registry
+systems_registry: Dict[str, Dict[str, Any]] = {}
+
+@app.get("/api/systems")
+async def list_systems():
+    """List all registered systems with their MCP servers."""
+    result = []
+    for name, system in systems_registry.items():
+        result.append({
+            "name": system["name"],
+            "description": system["description"],
+            "environment": system["environment"],
+            "ip_domain": system["ip_domain"],
+            "server_count": len(system.get("servers", [])),
+            "servers": [
+                {k: v for k, v in s.items() if k != "token"}
+                for s in system.get("servers", [])
+            ],
+        })
+    return result
+
+@app.post("/api/systems")
+async def register_system(config: SystemRegistration):
+    """Register a system with one or more MCP servers for monitoring."""
+    if config.name in systems_registry:
+        raise HTTPException(
+            status_code=409,
+            detail=f"System '{config.name}' is already registered."
+        )
+
+    entry = {
+        "name": config.name,
+        "description": config.description,
+        "environment": config.environment,
+        "ip_domain": config.ip_domain,
+        "servers": [s.model_dump() for s in config.servers],
+    }
+    systems_registry[config.name] = entry
+    logger.info("Registered system: %s (%s, %d servers)", config.name, config.environment, len(config.servers))
+    return {
+        "status": "registered",
+        "message": f"System '{config.name}' registered with {len(config.servers)} MCP server(s).",
+        "system": {
+            k: v for k, v in entry.items() if k != "servers" or True
+        },
+    }
+
+@app.get("/api/systems/{system_name}")
+async def get_system(system_name: str):
+    """Get details for a specific registered system."""
+    if system_name not in systems_registry:
+        raise HTTPException(status_code=404, detail=f"System '{system_name}' not found.")
+    system = systems_registry[system_name]
+    return {
+        "name": system["name"],
+        "description": system["description"],
+        "environment": system["environment"],
+        "ip_domain": system["ip_domain"],
+        "servers": [
+            {k: v for k, v in s.items() if k != "token"}
+            for s in system.get("servers", [])
+        ],
+    }
+
+@app.delete("/api/systems/{system_name}")
+async def unregister_system(system_name: str):
+    """Remove a registered system and all its MCP servers."""
+    if system_name not in systems_registry:
+        raise HTTPException(status_code=404, detail=f"System '{system_name}' not found.")
+    del systems_registry[system_name]
+    logger.info("Unregistered system: %s", system_name)
+    return {"status": "removed", "message": f"System '{system_name}' unregistered."}
 
 
 # ═══════════════════════════════════════════════════════════════════════

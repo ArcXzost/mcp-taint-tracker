@@ -5,10 +5,6 @@ const API_BASE = "http://127.0.0.1:8000";
 window.GRAPH_DATA = { nodes: new vis.DataSet(), edges: new vis.DataSet(), events: {} };
 let network = null;
 
-// ═══════════════════════════════════════════════════════════════════════
-//  Initialization
-// ═══════════════════════════════════════════════════════════════════════
-
 document.addEventListener("DOMContentLoaded", async () => {
     await initSimulations();
     await loadConfig();
@@ -31,6 +27,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 function startPolling() {
     if (pollingInterval) clearInterval(pollingInterval);
     pollingInterval = setInterval(() => {
+        refreshSystems();
         refreshSessions();
         refreshMetrics();
         if (currentSessionId) {
@@ -38,8 +35,123 @@ function startPolling() {
             refreshAlerts(currentSessionId);
         }
     }, 3000);
+    refreshSystems();
     refreshSessions();
     refreshMetrics();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Systems
+// ═══════════════════════════════════════════════════════════════════════
+
+async function refreshSystems() {
+    try {
+        const res = await fetch(`${API_BASE}/api/systems`);
+        const systems = await res.json();
+        renderSystemsList(systems);
+    } catch (e) {
+        console.error("Systems fetch error:", e);
+    }
+}
+
+function renderSystemsList(systems) {
+    const container = document.getElementById("systems-list");
+    if (!systems || systems.length === 0) {
+        container.innerHTML = '<div class="text-xs font-mono text-outline-variant py-2 text-center">No systems registered</div>';
+        return;
+    }
+    container.innerHTML = systems.map(s => {
+        const envColors = { development: "bg-amber-100 text-amber-800 border-amber-300", staging: "bg-blue-100 text-blue-800 border-blue-300", production: "bg-green-100 text-green-800 border-green-300" };
+        const envColor = envColors[s.environment] || "bg-gray-100 text-gray-800 border-gray-300";
+        return `
+            <div class="p-2 bg-surface border-[1.5px] border-outline rounded-lg">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="font-bold text-xs truncate">${s.name}</span>
+                    <span class="px-1.5 py-0.5 text-[9px] font-mono border rounded-full ${envColor}">${s.environment}</span>
+                </div>
+                <div class="flex items-center gap-2 text-[10px] font-mono text-muted">
+                    <span>${s.server_count} server${s.server_count !== 1 ? 's' : ''}</span>
+                    ${s.ip_domain ? `<span>• ${s.ip_domain}</span>` : ''}
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
+let systemModalInstance = null;
+
+function openSystemModal() {
+    const modalEl = document.getElementById('system-modal');
+    if (!systemModalInstance) {
+        systemModalInstance = new Modal(modalEl);
+        document.querySelector('#system-modal [data-modal-hide="system-modal"]').addEventListener('click', () => systemModalInstance.hide());
+    }
+    systemModalInstance.show();
+}
+
+function addServerField() {
+    const container = document.getElementById('servers-list');
+    const entry = document.createElement('div');
+    entry.className = 'server-entry p-3 bg-surface-dim border-[1.5px] border-outline-variant rounded-lg';
+    entry.innerHTML = `
+        <div class="grid grid-cols-2 gap-2">
+            <input type="text" class="srv-name text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono" placeholder="name" />
+            <input type="text" class="srv-url text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono" placeholder="url" />
+        </div>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+            <select class="srv-transport text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono">
+                <option value="stdio">stdio</option>
+                <option value="sse">sse</option>
+                <option value="streamable-http">streamable-http</option>
+            </select>
+            <button type="button" onclick="this.closest('.server-entry').remove()" class="text-xs py-1 border-[1.5px] border-error text-error rounded-full hover:bg-error-container transition-all">Remove</button>
+        </div>
+    `;
+    container.appendChild(entry);
+}
+
+async function registerSystem() {
+    const name = document.getElementById("sys-name").value.trim();
+    if (!name) {
+        showToast("System name is required.", "error");
+        return;
+    }
+    const servers = [];
+    document.querySelectorAll('.server-entry').forEach(entry => {
+        const sname = entry.querySelector('.srv-name').value.trim();
+        const url = entry.querySelector('.srv-url').value.trim();
+        const transport = entry.querySelector('.srv-transport').value;
+        if (sname && url) {
+            servers.push({ name: sname, url: url, transport: transport });
+        }
+    });
+    if (servers.length === 0) {
+        showToast("At least one MCP server is required.", "error");
+        return;
+    }
+    try {
+        const res = await fetch(`${API_BASE}/api/systems`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                name: name,
+                description: document.getElementById("sys-description").value.trim(),
+                environment: document.getElementById("sys-environment").value,
+                ip_domain: document.getElementById("sys-ip-domain").value.trim(),
+                servers: servers
+            })
+        });
+        if (res.ok) {
+            showToast(`System "${name}" registered!`, "success");
+            if (systemModalInstance) systemModalInstance.hide();
+            await refreshSystems();
+        } else {
+            const err = await res.json();
+            showToast(err.detail || "Failed to register system.", "error");
+        }
+    } catch (e) {
+        showToast("Error registering system.", "error");
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -62,12 +174,8 @@ function renderSessionList(sessions) {
 
     if (!sessions || sessions.length === 0) {
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center py-8 text-outline-variant">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
-                  <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
-                </svg>
-                <span class="mt-2 text-sm font-mono">No active sessions</span>
+            <div class="flex flex-col items-center justify-center py-6 text-outline-variant">
+                <span class="mt-2 text-xs font-mono">No active sessions</span>
             </div>`;
         return;
     }
@@ -76,21 +184,18 @@ function renderSessionList(sessions) {
         const isActive = s.session_id === currentSessionId;
         const shortId = s.session_id.startsWith("sim-") ? s.session_id.substring(4, 12) : s.session_id.substring(0, 8);
         const alertLabel = s.alert_count > 0 ? `${s.alert_count} Alert${s.alert_count > 1 ? 's' : ''}` : "Clean";
-        const badgeColor = s.alert_count > 0 ? "bg-error text-error-on border-error" : "bg-secondary-container text-secondary-onContainer border-secondary";
+        const badgeColor = s.alert_count > 0 ? "bg-error text-error-on border-error" : "bg-green-100 text-green-800 border-green-300";
         const activeClass = isActive ? "shadow-stack bg-surface-dim" : "shadow-none hover:bg-surface-dim";
         
         return `
-            <div class="p-3 bg-surface border-[1.5px] border-outline rounded-xl cursor-pointer transition-all ${activeClass}" 
+            <div class="p-2 bg-surface border-[1.5px] border-outline rounded-lg cursor-pointer transition-all ${activeClass}" 
                  onclick="selectSession('${s.session_id}')">
                 <div class="flex justify-between items-center mb-1">
-                    <span class="font-mono text-sm font-bold truncate pr-2">${shortId}</span>
-                    <span class="px-2 py-0.5 text-[10px] font-mono border ${badgeColor} rounded-full whitespace-nowrap">
-                        ${alertLabel}
-                    </span>
+                    <span class="font-mono text-xs font-bold truncate pr-2">${shortId}</span>
+                    <span class="px-1.5 py-0.5 text-[9px] font-mono border ${badgeColor} rounded-full whitespace-nowrap">${alertLabel}</span>
                 </div>
-                <div class="flex justify-between items-center text-xs text-outline-variant font-mono mt-2">
-                    <span>${s.node_count} nodes</span>
-                    <span>${s.edge_count} edges</span>
+                <div class="flex justify-between items-center text-[10px] text-outline-variant font-mono">
+                    <span>${s.node_count} nodes / ${s.edge_count} edges</span>
                 </div>
             </div>
         `;
@@ -107,7 +212,7 @@ function selectSession(sessionId) {
     currentSessionId = sessionId;
     refreshGraph(sessionId);
     refreshAlerts(sessionId);
-    refreshSessions(); // to update active class
+    refreshSessions();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -205,18 +310,18 @@ function renderGraph(graphData) {
     });
 
     const newEdges = [];
+    const methodColors = { explicit: '#a3a3a3', lexical: '#f59e0b', semantic: '#ef4444', memory: '#8b5cf6' };
     graphData.edges.forEach(e => {
-        let edgeColor = '#a3a3a3'; // exact/explicit (muted gray for dark theme)
-        if (e.method === 'lexical') edgeColor = '#f59e0b';
-        else if (e.method === 'semantic') edgeColor = '#ef4444';
-
+        const color = methodColors[e.method] || '#a3a3a3';
         newEdges.push({
             id: `${e.from}-${e.to}`,
             from: e.from,
             to: e.to,
-            label: `${(e.confidence * 100).toFixed(0)}%`,
-            title: `Method: ${e.method}\nEvidence: ${e.evidence}`,
-            color: { color: edgeColor }
+            label: `${(e.confidence * 100).toFixed(0)}% [${e.method}]`,
+            title: `Method: ${e.method}\nConfidence: ${(e.confidence * 100).toFixed(0)}%\nEvidence: ${e.evidence}`,
+            color: { color: color },
+            dashes: e.in_alert_path ? false : true,
+            width: e.in_alert_path ? 2.5 : 0.8
         });
     });
 
@@ -238,8 +343,6 @@ async function refreshAlerts(sessionId) {
         const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/alerts`);
         if (!res.ok) return;
         const alerts = await res.json();
-        
-        // document.getElementById("alert-count-badge").textContent = alerts.length;
         renderAlerts(alerts);
     } catch (e) {
         console.error("Failed to fetch alerts:", e);
@@ -264,15 +367,17 @@ function renderAlerts(alerts) {
         return `
             <div class="p-4 bg-surface border-[1.5px] ${borderClass} rounded-xl shadow-card transition-all">
                 <div class="flex items-center justify-between mb-2">
-                    <span class="px-2 py-0.5 text-[10px] font-mono rounded-full bg-error-container text-error-onContainer border border-error uppercase">
-                        ${a.severity}
+                    <span class="flex items-center gap-1">
+                        <span class="px-2 py-0.5 text-[10px] font-mono rounded-full bg-error-container text-error-onContainer border border-error uppercase">${a.severity}</span>
+                        <span class="px-2 py-0.5 text-[10px] font-mono rounded-full bg-amber-100 text-amber-800 border border-amber-300">${a.recommended_tier}</span>
                     </span>
-                    <span class="text-xs font-mono text-outline-variant">${(a.confidence * 100).toFixed(0)}% Conf</span>
+                    <span class="text-xs font-mono text-outline-variant">${(a.confidence * 100).toFixed(0)}%</span>
                 </div>
-                <h4 class="font-bold text-sm mb-1">${a.violation}</h4>
-                <div class="text-xs font-mono text-outline-variant mb-3">
-                    ${a.source_node} → ${a.sink_node}
-                </div>
+                <h4 class="font-bold text-sm mb-1">${a.rule}</h4>
+                <div class="text-xs font-mono text-outline-variant mb-2">${a.violation}</div>
+                <div class="text-xs font-mono text-outline-variant mb-3">${a.source_node} → ${a.sink_node}</div>
+                
+                ${a.mitre_techniques.length > 0 ? `<div class="text-[10px] font-mono text-outline-variant mb-2">MITRE: ${a.mitre_techniques.join(', ')}</div>` : ''}
                 
                 <div class="flex gap-2 w-full">
                     <button onclick="triageAlert('${a.alert_id}', 'tp')" class="flex-1 text-xs py-1.5 border-[1.5px] border-outline rounded-full font-semibold transition-colors ${tpClass}">TP</button>
@@ -318,7 +423,7 @@ async function openAlertDetails(alertId) {
 
         const content = document.getElementById('alert-details-content');
         content.innerHTML = `
-            <div class="grid grid-cols-2 gap-4 mb-4">
+            <div class="grid grid-cols-3 gap-4 mb-4">
                 <div class="p-3 bg-surface-dim border-[1.5px] border-outline-variant rounded-xl">
                     <div class="text-[10px] font-mono tracking-widest uppercase text-outline-variant mb-1">Violation</div>
                     <div class="font-bold text-sm">${alert.violation}</div>
@@ -327,7 +432,17 @@ async function openAlertDetails(alertId) {
                     <div class="text-[10px] font-mono tracking-widest uppercase text-outline-variant mb-1">Matched Rule</div>
                     <div class="font-bold text-sm">${alert.rule}</div>
                 </div>
+                <div class="p-3 bg-surface-dim border-[1.5px] border-outline-variant rounded-xl">
+                    <div class="text-[10px] font-mono tracking-widest uppercase text-outline-variant mb-1">Recommended Tier</div>
+                    <div class="font-bold text-sm">${alert.recommended_tier}</div>
+                </div>
             </div>
+            
+            ${alert.mitre_techniques.length > 0 ? `
+            <div class="p-3 bg-surface-dim border-[1.5px] border-outline-variant rounded-xl mb-4">
+                <div class="text-[10px] font-mono tracking-widest uppercase text-outline-variant mb-2">MITRE ATT&CK</div>
+                <div class="font-mono text-sm">${alert.mitre_techniques.join(', ')}</div>
+            </div>` : ''}
             
             <div class="p-3 bg-surface-dim border-[1.5px] border-outline-variant rounded-xl mb-4">
                 <div class="text-[10px] font-mono tracking-widest uppercase text-outline-variant mb-2">Execution Path</div>
@@ -395,14 +510,12 @@ function renderMetrics(m) {
     document.getElementById("m-f1").textContent = (m.detection.f1_score * 100).toFixed(0) + '%';
     document.getElementById("m-fpr").textContent = (m.detection.false_positive_rate * 100).toFixed(0) + '%';
 
-    // Runtime
     if(document.getElementById("m-p50")) {
         document.getElementById("m-p50").textContent = m.runtime.p50_latency_ms.toFixed(1) + 'ms';
         document.getElementById("m-p95").textContent = m.runtime.p95_latency_ms.toFixed(1) + 'ms';
         document.getElementById("m-memory").textContent = m.runtime.peak_memory_mb.toFixed(0) + 'MB';
         document.getElementById("m-attr-cost").textContent = m.runtime.attribution_overhead_pct.toFixed(1) + '%';
         
-        // Attribution
         document.getElementById("m-explicit").textContent = m.attribution.explicit_detections;
         document.getElementById("m-lexical").textContent = m.attribution.lexical_detections;
         document.getElementById("m-semantic").textContent = m.attribution.semantic_detections;
@@ -417,20 +530,41 @@ function setStatus(text, isGreen) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Actions & Config
+//  Config & Detection Tiers
 // ═══════════════════════════════════════════════════════════════════════
 
 async function loadConfig() {
     try {
         const res = await fetch(`${API_BASE}/api/config`);
         const conf = await res.json();
-        const t = conf.tiers;
-        document.getElementById("tier-explicit").checked = t.explicit_enabled;
-        document.getElementById("tier-lexical").checked = t.lexical_enabled;
-        document.getElementById("tier-semantic").checked = t.semantic_enabled;
+        
+        // Flow engine tiers
+        const f = conf.flow_engine_tiers || conf;
+        if (document.getElementById("tier-explicit")) {
+            document.getElementById("tier-explicit").checked = f.explicit !== false;
+            document.getElementById("tier-lexical").checked = f.lexical !== false;
+            document.getElementById("tier-semantic").checked = f.semantic !== false;
+        }
+        
+        // Detection tiers (P0-P3)
+        renderDetectionTiers(conf.detection_tiers, conf.fp_budget);
     } catch (e) {
         console.error("Config load error:", e);
     }
+}
+
+function renderDetectionTiers(tiers, fpBudget) {
+    const container = document.getElementById("detection-tiers-list");
+    if (!tiers) {
+        container.innerHTML = '<div class="text-xs text-muted">Loading...</div>';
+        return;
+    }
+    container.innerHTML = Object.entries(tiers).map(([key, tier]) => `
+        <div class="flex items-center justify-between py-1 border-b border-outline-variant last:border-0">
+            <span class="font-bold text-xs">${key}</span>
+            <span class="text-[10px]">${(tier.min_efficacy * 100).toFixed(0)}% eff • ${tier.max_fp_budget_minutes === Infinity ? '∞' : tier.max_fp_budget_minutes + 'm'} FP</span>
+        </div>
+    `).join("");
 }
 
 async function toggleTier(tier, enabled) {
@@ -444,7 +578,6 @@ async function toggleTier(tier, enabled) {
         console.error("Tier toggle error:", e);
     }
 }
-async function updateConfig() {}
 
 async function runLearningPipeline() {
     const btn = document.getElementById("btn-learn");
@@ -452,23 +585,20 @@ async function runLearningPipeline() {
         btn.disabled = true;
         btn.innerHTML = `<svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Tuning...`;
     }
-
     try {
         const res = await fetch(`${API_BASE}/api/learn`, { method: "POST" });
         const data = await res.json();
-        
         if (!res.ok) {
             showToast("Learning pipeline failed.", "error");
         } else {
             showToast("Successfully optimized AI thresholds.", "success");
         }
     } catch (e) {
-        console.error("Learning error:", e);
         showToast("Error executing learning pipeline.", "error");
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Auto-Tune AI`;
+            btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Tune`;
         }
     }
 }
@@ -497,7 +627,7 @@ async function initSimulations() {
 }
 
 async function resetDashboard() {
-    if (!confirm("Are you sure you want to clear all graph data, alerts, and sessions from Neo4j?")) return;
+    if (!confirm("Are you sure you want to clear all graph data, alerts, and sessions?")) return;
     try {
         await fetch(`${API_BASE}/api/reset`, { method: "POST" });
         showToast("Dashboard data cleared successfully.", "success");
@@ -511,57 +641,6 @@ async function resetDashboard() {
         await refreshMetrics();
     } catch (e) {
         showToast("Failed to reset dashboard.", "error");
-    }
-}
-
-let connectModalInstance = null;
-
-function openConnectModal() {
-    const modalEl = document.getElementById('connect-modal');
-    if (!connectModalInstance) {
-        connectModalInstance = new Modal(modalEl);
-        document.querySelector('#connect-modal [data-modal-hide="connect-modal"]').addEventListener('click', () => connectModalInstance.hide());
-    }
-    connectModalInstance.show();
-}
-
-async function connectMcpServer() {
-    const cmdInput = document.getElementById("mcp-command").value;
-    const envInput = document.getElementById("mcp-env").value;
-    if (!cmdInput) return;
-    
-    let envObj = {};
-    if (envInput) {
-        try {
-            envObj = JSON.parse(envInput);
-        } catch (e) {
-            showToast("Invalid JSON in environment variables.", "error");
-            return;
-        }
-    }
-    
-    const parts = cmdInput.trim().split(/\s+/);
-    const command = parts[0];
-    const args = parts.slice(1);
-    
-    try {
-        const res = await fetch(`${API_BASE}/api/mcp-servers`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                command: command,
-                args: args,
-                env: envObj
-            })
-        });
-        if (res.ok) {
-            showToast("MCP Server connected via Proxy!", "success");
-            if (connectModalInstance) connectModalInstance.hide();
-        } else {
-            showToast("Failed to connect MCP server.", "error");
-        }
-    } catch (e) {
-        showToast("Error connecting MCP server.", "error");
     }
 }
 
@@ -594,7 +673,7 @@ async function runSimulation() {
         } catch (e) {
             console.error("Event injection error:", e);
         }
-        await new Promise(r => setTimeout(r, 600)); // 600ms gap
+        await new Promise(r => setTimeout(r, 600));
     }
 
     showToast("Simulation complete.", "success");
@@ -617,7 +696,7 @@ function showToast(message, type = "info") {
     
     if (type === "success") {
         icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-        colorClass = "bg-secondary-container text-secondary-onContainer border-[1.5px] border-secondary shadow-card";
+        colorClass = "bg-green-100 text-green-800 border-[1.5px] border-green-300 shadow-card";
     } else if (type === "error") {
         icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
         colorClass = "bg-error text-error-on border-[1.5px] border-error shadow-card";
@@ -643,6 +722,7 @@ function showToast(message, type = "info") {
 // ═══════════════════════════════════════════════════════════════════════
 //  YAML Rules Editor
 // ═══════════════════════════════════════════════════════════════════════
+
 let currentRules = [];
 let activeRuleFilename = null;
 
@@ -663,8 +743,14 @@ async function fetchRules() {
         const res = await fetch(`${API_BASE}/api/rules`);
         if (!res.ok) throw new Error("Failed to fetch rules");
         const data = await res.json();
-        currentRules = Array.isArray(data) ? data : (data.rules || []);
+        currentRules = data.rules || [];
         renderRulesList();
+        
+        // Show efficacy summary
+        if (data.efficacy_summary) {
+            document.getElementById('rule-filename-display').textContent = 
+                `${data.efficacy_summary.rules_loaded} rules • ${data.efficacy_summary.rules_with_tests} with tests`;
+        }
     } catch (e) {
         showToast("Error loading rules", "error");
     }
@@ -676,9 +762,15 @@ function renderRulesList() {
         <div onclick="selectRule('${r.filename}')" class="p-3 bg-surface border-[1.5px] border-outline-variant rounded-xl cursor-pointer hover:bg-surface-dim transition-all ${activeRuleFilename === r.filename ? 'shadow-stack bg-surface-dim' : ''}">
             <div class="flex items-center justify-between mb-1">
                 <span class="font-bold text-sm truncate">${r.name}</span>
-                <span class="px-2 py-0.5 text-[10px] font-mono rounded-full border border-error bg-error-container text-error-onContainer uppercase">${r.severity}</span>
+                <span class="px-2 py-0.5 text-[9px] font-mono rounded-full border border-error bg-error-container text-error-onContainer uppercase">${r.severity}</span>
             </div>
-            <div class="text-xs font-mono text-outline-variant truncate">${r.filename}</div>
+            <div class="text-[10px] font-mono text-outline-variant truncate mb-1">${r.filename}</div>
+            <div class="flex items-center gap-2 text-[9px] font-mono text-muted">
+                ${r.schema_version ? `<span class="px-1 py-0.5 bg-surface border border-outline-variant rounded">v${r.schema_version}</span>` : ''}
+                ${r.mitre_techniques && r.mitre_techniques.length > 0 ? `<span>${r.mitre_techniques.join(', ')}</span>` : ''}
+                ${r.test_count !== undefined ? `<span>${r.test_count} tests</span>` : ''}
+            </div>
+            ${r.description ? `<div class="text-[10px] font-mono text-muted mt-1 truncate">${r.description}</div>` : ''}
         </div>
     `).join("");
 }
@@ -691,16 +783,41 @@ function selectRule(filename) {
         document.getElementById('rule-editor').value = rule.raw_yaml;
         document.getElementById('btn-save-rule').classList.remove('hidden');
         document.getElementById('btn-save-rule').classList.add('flex');
+        
+        // Show metadata
+        const metaContainer = document.getElementById('rule-metadata-display');
+        metaContainer.innerHTML = `
+            ${rule.schema_version ? `<span class="px-1.5 py-0.5 bg-surface border border-outline rounded">v${rule.schema_version}</span>` : ''}
+            ${rule.mitre_techniques && rule.mitre_techniques.length > 0 ? `<span>${rule.mitre_techniques.join(', ')}</span>` : ''}
+            ${rule.test_count !== undefined ? `<span>${rule.test_count} tests</span>` : ''}
+        `;
     }
-    renderRulesList(); // Update active state
+    renderRulesList();
 }
 
 function createNewRule() {
     activeRuleFilename = `custom_rule_${Date.now()}.yaml`;
     document.getElementById('rule-filename-display').textContent = activeRuleFilename;
-    document.getElementById('rule-editor').value = `name: "New Custom Rule"\nseverity: "MEDIUM"\npattern:\n  source:\n    tools: []\n  path:\n    max_hops: 3\n    requires_taint: true\n  sink:\n    tools: []\n`;
+    document.getElementById('rule-editor').value = `schema_version: 2
+name: "New Custom Rule"
+severity: "MEDIUM"
+description: ""
+mitre_techniques: []
+pattern:
+  source:
+    taints: []
+  path:
+    max_hops: 3
+    requires_taint: true
+  sink:
+    tools: []
+test:
+  positive: []
+  negative: []
+`;
     document.getElementById('btn-save-rule').classList.remove('hidden');
     document.getElementById('btn-save-rule').classList.add('flex');
+    document.getElementById('rule-metadata-display').innerHTML = '<span class="px-1.5 py-0.5 bg-surface border border-outline rounded">v2</span><span>0 tests</span>';
     renderRulesList();
 }
 
@@ -717,11 +834,67 @@ async function saveCurrentRule() {
         
         if (res.ok) {
             showToast("Rule saved & compiled!", "success");
-            await fetchRules(); // Reload list
+            await fetchRules();
         } else {
             showToast("Failed to save rule.", "error");
         }
     } catch (e) {
         showToast("Error saving rule.", "error");
     }
+}
+
+async function testAllRules() {
+    const toast = showToast("Connecting test stream...", "info");
+    const btn = document.getElementById("btn-run-tests");
+    if (btn) btn.disabled = true;
+
+    let processed = 0;
+    let total = 0;
+    let passed = 0;
+    let failed = 0;
+
+    const es = new EventSource(`${API_BASE}/api/rules/test/stream`);
+
+    es.addEventListener('test_start', (e) => {
+        const data = JSON.parse(e.data);
+        total = data.total;
+        showToast(`Running YAML tests (0/${total})...`, "info");
+    });
+
+    es.addEventListener('test_progress', (e) => {
+        const data = JSON.parse(e.data);
+        processed++;
+        if (data.pattern_status === "passed") {
+            showToast(`[${processed}/${total}] PASS: ${data.rule} - ${data.test}`, "success");
+        } else {
+            showToast(`[${processed}/${total}] FAIL: ${data.rule} - ${data.test}`, "error");
+        }
+        // Refresh session list so new test session appears
+        refreshSessions();
+    });
+
+    es.addEventListener('test_done', (e) => {
+        const data = JSON.parse(e.data);
+        es.close();
+        if (btn) btn.disabled = false;
+        showToast(`Tests complete: ${data.passed} passed, ${data.failed} failed`, data.failed > 0 ? "error" : "success");
+        // Auto-select first test session
+        fetch(`${API_BASE}/api/sessions`).then(r => r.json()).then(sessions => {
+            renderSessionList(sessions);
+            const ts = sessions.find(s => s.session_id.startsWith("test-"));
+            if (ts) selectSession(ts.session_id);
+        });
+    });
+
+    es.addEventListener('test_aborted', (e) => {
+        es.close();
+        if (btn) btn.disabled = false;
+        showToast("Test stream aborted.", "error");
+    });
+
+    es.onerror = () => {
+        es.close();
+        if (btn) btn.disabled = false;
+        showToast("Test stream connection lost.", "error");
+    };
 }
