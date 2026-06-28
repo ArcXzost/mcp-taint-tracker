@@ -60,19 +60,23 @@ The HLD illustrates the core concept: acting as a transparent proxy between AI a
 
 ```mermaid
 graph LR
+    classDef core fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#ffffff
+    classDef ext fill:#14532d,stroke:#22c55e,stroke-width:2px,color:#ffffff
+    classDef db fill:#581c87,stroke:#a855f7,stroke-width:2px,color:#ffffff
+
     subgraph Clients["Client Layer"]
-        Agent["AI Agents / LLM Frameworks<br/>(LangChain, LlamaIndex, n8n, etc.)"]
+        Agent["AI Agents / LLM Frameworks<br/>(LangChain, LlamaIndex, n8n, etc.)"]:::ext
     end
 
     subgraph Core["MCP Semantic Taint Tracker"]
-        Gateway["Intercepting Gateway<br/>(Transparent Proxy)"]
-        AsyncPipeline["Taint Analysis Pipeline<br/>(Asynchronous)"]
-        GraphDB[("Knowledge Graph<br/>(Provenance & Alerts)")]
-        Dashboard["Monitoring Dashboard"]
+        Gateway["Intercepting Gateway<br/>(Transparent Proxy)"]:::core
+        AsyncPipeline["Taint Analysis Pipeline<br/>(Asynchronous)"]:::core
+        GraphDB[("Knowledge Graph<br/>(Provenance & Alerts)")]:::db
+        Dashboard["Monitoring Dashboard"]:::core
     end
 
     subgraph Targets["Target Infrastructure"]
-        MCPServers["Target MCP Servers<br/>(Filesystem, Memory, APIs)"]
+        MCPServers["Target MCP Servers<br/>(Filesystem, Memory, APIs)"]:::ext
     end
 
     Agent <-->|MCP Requests & Responses| Gateway
@@ -88,38 +92,43 @@ The LLD breaks down the internal components of the interception layer and the mu
 
 ```mermaid
 graph TB
+    classDef core fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#ffffff
+    classDef ext fill:#14532d,stroke:#22c55e,stroke-width:2px,color:#ffffff
+    classDef db fill:#581c87,stroke:#a855f7,stroke-width:2px,color:#ffffff
+    classDef broker fill:#78350f,stroke:#f59e0b,stroke-width:2px,color:#ffffff
+
     subgraph Interception["Interception Layer (FastAPI)"]
-        HTTP["Gateway Endpoints<br/>(HTTP / SSE)"]
-        Proxy["MCP Tool Router"]
-        EventCap["Event Emitter"]
+        HTTP["Gateway Endpoints<br/>(HTTP / SSE)"]:::core
+        Proxy["MCP Tool Router"]:::core
+        EventCap["Event Emitter"]:::core
         
         HTTP <--> Proxy
         Proxy --> EventCap
     end
 
     subgraph Broker["Message Broker"]
-        Kafka[["Kafka Event Bus"]]
+        Kafka[["Kafka Event Bus"]]:::broker
     end
 
     subgraph Pipeline["Data Processing Pipeline"]
-        Scanner["Secret & Data Scanner<br/>(Regex / Entropy / PII)"]
-        Attribution["Flow Attribution Engine"]
+        Scanner["Secret & Data Scanner<br/>(Regex / Entropy / PII)"]:::core
+        Attribution["Flow Attribution Engine"]:::core
         
         subgraph DetectionTiers["Semantic Matching Tiers"]
-            T1["Explicit (Token Overlap)"]
-            T2["Lexical (Fuzzy Match)"]
-            T3["Semantic (Sentence Transformers)"]
+            T1["Explicit (Token Overlap)"]:::core
+            T2["Lexical (Fuzzy Match)"]:::core
+            T3["Semantic (Sentence Transformers)"]:::core
         end
         
-        PolicyEval["Policy Engine<br/>(YAML Rule Evaluator)"]
+        PolicyEval["Policy Engine<br/>(YAML Rule Evaluator)"]:::core
     end
 
     subgraph Storage["State & Storage"]
-        Neo4j[("Neo4j Knowledge Graph")]
+        Neo4j[("Neo4j Knowledge Graph")]:::db
     end
     
     subgraph Target["External"]
-        Backends["Downstream MCP Servers<br/>(stdio / SSE transports)"]
+        Backends["Downstream MCP Servers<br/>(stdio / SSE transports)"]:::ext
     end
 
     Proxy <-->|Pass-through| Backends
