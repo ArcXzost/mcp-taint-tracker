@@ -191,23 +191,27 @@ class PolicyEngine:
     def __init__(self, rules_dir: str = "rules"):
         self.rules: List[DeclarativeRule] = []
         self.rule_thresholds = {}
+        self.rule_lexical_thresholds = {}
         self.global_threshold = 0.50
+        self.global_lexical_threshold = 0.75
         self._load_rules(rules_dir)
         self.reload_thresholds()
         
     def reload_thresholds(self):
-        """Load optimized rule thresholds from learning pipeline."""
+        """Load optimized rule thresholds from learning pipeline (semantic + lexical)."""
         if os.path.exists("optimized_thresholds.json"):
             try:
                 with open("optimized_thresholds.json", "r") as f:
                     opt = json.load(f)
                     if "_global" in opt:
                         self.global_threshold = opt["_global"].get("semantic_threshold", 0.50)
+                        self.global_lexical_threshold = opt["_global"].get("lexical_threshold", 0.75)
                     if "rules" in opt:
-                        self.rule_thresholds = {
-                            k: v.get("semantic_threshold", self.global_threshold) 
-                            for k, v in opt["rules"].items()
-                        }
+                        self.rule_thresholds = {}
+                        self.rule_lexical_thresholds = {}
+                        for k, v in opt["rules"].items():
+                            self.rule_thresholds[k] = v.get("semantic_threshold", self.global_threshold)
+                            self.rule_lexical_thresholds[k] = v.get("lexical_threshold", self.global_lexical_threshold)
             except Exception as e:
                 logger.error(f"Failed to load optimized thresholds: {e}")
 

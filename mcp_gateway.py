@@ -24,6 +24,8 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 import httpx
+from mcp import ClientSession
+from mcp.client.sse import sse_client
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,7 @@ class BackendConnection:
         self._client = None
         self._read = None
         self._write = None
+        self._sse_ctx = None
         self.tools: List[Dict] = []
 
     async def connect(self):
@@ -56,7 +59,7 @@ class BackendConnection:
             logger.warning("Unknown transport %s for server %s", transport, self.name)
 
     async def _connect_stdio(self):
-        from mcp import ClientSession, StdioServerParameters
+        from mcp import StdioServerParameters
         from mcp.client.stdio import stdio_client
 
         cmd_str = self.config.get("url", "")
@@ -69,7 +72,11 @@ class BackendConnection:
         await self._session.initialize()
 
     async def _connect_http(self):
-        self._client = httpx.AsyncClient(timeout=30.0)
+        sse_url = self.config.get("url", "")
+        self._sse_ctx = sse_client(url=sse_url)
+        self._read, self._write = await self._sse_ctx.__aenter__()
+        self._session = await ClientSession(self._read, self._write).__aenter__()
+        await self._session.initialize()
 
     async def list_tools(self) -> List[Dict]:
         transport = self.config.get("transport", "stdio")
@@ -80,16 +87,12 @@ class BackendConnection:
                  "inputSchema": t.inputSchema, "server_name": self.name}
                 for t in result.tools
             ]
-        elif transport in ("sse", "streamable-http") and self._client:
-            resp = await self._client.post(
-                self.config["url"],
-                json={"jsonrpc": "2.0", "id": str(uuid.uuid4())[:8],
-                      "method": "tools/list", "params": {}}
-            )
-            data = resp.json()
-            raw_tools = data.get("result", {}).get("tools", [])
+        elif transport in ("sse", "streamable-http") and self._session:
+            result = await self._session.list_tools()
             self.tools = [
-                {**t, "server_name": self.name} for t in raw_tools
+                {"name": t.name, "description": t.description,
+                 "inputSchema": t.inputSchema, "server_name": self.name}
+                for t in result.tools
             ]
         return self.tools
 
@@ -98,18 +101,15 @@ class BackendConnection:
         if transport == "stdio" and self._session:
             result = await self._session.call_tool(tool_name, arguments)
             return {"content": _format_mcp_content(result.content)}
-        elif transport in ("sse", "streamable-http") and self._client:
-            resp = await self._client.post(
-                self.config["url"],
-                json={"jsonrpc": "2.0", "id": str(uuid.uuid4())[:8],
-                      "method": "tools/call",
-                      "params": {"name": tool_name, "arguments": arguments}}
-            )
-            return resp.json().get("result", {"content": []})
+        elif transport in ("sse", "streamable-http") and self._session:
+            result = await self._session.call_tool(tool_name, arguments)
+            return {"content": _format_mcp_content(result.content)}
 
     async def close(self):
         if self._session:
             await self._session.__aexit__(None, None, None)
+        if self._sse_ctx:
+            await self._sse_ctx.__aexit__(None, None, None)
         if self._client:
             await self._client.aclose()
 
@@ -164,6 +164,8 @@ _backends: Dict[str, BackendConnection] = {}
 _tools_cache: List[Dict] = []
 _tools_cache_time: float = 0
 _initialized: bool = False
+# All events from the gateway share one session so edges/taints propagate
+_gateway_session_id: str = f"n8n-{uuid.uuid4().hex[:12]}"
 
 
 async def initialize_backends(server_configs: List[Dict]):
@@ -248,7 +250,8 @@ def register_mcp_routes(app):
         elif method == "initialize":
             return jsonrpc_result(req_id, {
                 "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}}
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "mcp-taint-tracker-gateway", "version": "1.0.0"}
             })
         elif method == "notifications/initialized":
             return jsonrpc_result(req_id, {})
@@ -317,9 +320,8 @@ def register_mcp_routes(app):
         # Capture output
         output_text = json.dumps(result.get("content", []))
 
-        # Post event to taint tracker
-        session_id = params.get("_session_id", f"n8n-{uuid.uuid4().hex[:12]}")
-        await _post_event_to_tracker(session_id, {
+        # Post event to taint tracker (all tool calls share one session for edge tracking)
+        await _post_event_to_tracker(_gateway_session_id, {
             "tool_name": tool_name,
             "server_name": target_server or "unknown",
             "input": arguments,

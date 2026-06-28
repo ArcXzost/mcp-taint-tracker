@@ -1,14 +1,19 @@
-@"
-╔══════════════════════════════════════════════════════════════╗
-║   MCP Semantic Taint Tracker — Demo Launcher               ║
-║                                                            ║
-║  Starts all services needed for the n8n integration demo:  ║
-║   1. Taint Tracker API + MCP Gateway (port 8000)           ║
-║   2. Real Filesystem MCP Server (port 3100)                ║
-║   3. Real Memory MCP Server, benign (port 3101)            ║
-║   4. Malicious MCP Server (port 3102)                      ║
-╚══════════════════════════════════════════════════════════════╝
-"@
+# ============================================================
+#  MCP Semantic Taint Tracker - Demo Launcher
+#
+#  Starts backend MCP servers for the n8n integration demo.
+#  Note: The Taint Tracker API + MCP Gateway runs as the main
+#  project (separately). Only backend servers here.
+#
+#   1. Real Filesystem MCP Server (port 3100)
+#   2. Real Memory MCP Server, benign (port 3101)
+#   3. Malicious MCP Server (port 3102)
+# ============================================================
+
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "  MCP Semantic Taint Tracker - Backend Servers" -ForegroundColor Cyan
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host ""
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -17,6 +22,7 @@ $WorkspaceDir = "$env:USERPROFILE\mcp-workspace"
 if (-not (Test-Path -LiteralPath $WorkspaceDir)) {
     New-Item -ItemType Directory -Path $WorkspaceDir -Force | Out-Null
 }
+
 # Create a sample file for the demo
 $SampleFile = "$WorkspaceDir\project_readme.md"
 if (-not (Test-Path -LiteralPath $SampleFile)) {
@@ -81,32 +87,16 @@ $MemJob = Start-Job -ScriptBlock {
 Start-Sleep -Seconds 3
 Write-Host "[start] Memory server started (PID: $($MemJob.Id))" -ForegroundColor Green
 
-# ── 4. Start Taint Tracker (port 8000) ─────────────────────────────────────
-Write-Host "[start] Starting Taint Tracker API + MCP Gateway on port 8000..." -ForegroundColor Cyan
-$TrackerJob = Start-Job -ScriptBlock {
-    Set-Location -LiteralPath $using:RootDir
-    $env:MCP_FS_ROOT = $using:WorkspaceDir
-    uvicorn app:app --host 0.0.0.0 --port 8000 --reload 2>&1
-}
-Start-Sleep -Seconds 5
-
 Write-Host ""
-Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Green
-Write-Host "║  All services running!                                     ║" -ForegroundColor Green
-Write-Host "║                                                             ║" -ForegroundColor Green
-Write-Host "║  Dashboard   : http://localhost:8000                        ║" -ForegroundColor Green
-Write-Host "║  MCP Gateway : http://localhost:8000/mcp                    ║" -ForegroundColor Green
-Write-Host "║  Filesystem  : http://localhost:3100                        ║" -ForegroundColor Green
-Write-Host "║  Memory      : http://localhost:3101                        ║" -ForegroundColor Green
-Write-Host "║  Malicious   : http://localhost:3102                        ║" -ForegroundColor Green
-Write-Host "║                                                             ║" -ForegroundColor Green
-Write-Host "║  Setup in n8n:                                              ║" -ForegroundColor Green
-Write-Host "║  1. Import n8n_workflow.json                                ║" -ForegroundColor Green
-Write-Host "║  2. Add your OpenAI API key to the LLM node                 ║" -ForegroundColor Green
-Write-Host "║  3. Select ALL tools in MCP Client Tool node                ║" -ForegroundColor Green
-Write-Host "║  4. Open Chat and ask: 'What's in project_readme.md?'       ║" -ForegroundColor Green
-Write-Host "║  5. Then ask: 'List available tools and save results'       ║" -ForegroundColor Green
-Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host "  Backend servers running!" -ForegroundColor Green
+Write-Host "  Filesystem  : http://localhost:3100" -ForegroundColor Green
+Write-Host "  Memory      : http://localhost:3101" -ForegroundColor Green
+Write-Host "  Malicious   : http://localhost:3102" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Make sure Taint Tracker is running on port 8000" -ForegroundColor Yellow
+Write-Host "  Then register these servers via the Systems panel." -ForegroundColor Yellow
+Write-Host "============================================================" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "Press Ctrl+C to stop all services"
@@ -118,13 +108,13 @@ try {
         Start-Sleep -Seconds 10
         # Check if jobs are still running
         $jobs = Get-Job -State Running
-        if ($jobs.Count -lt 4) {
+        if ($jobs.Count -lt 3) {
             Write-Host "[warn] Some services have stopped!" -ForegroundColor Yellow
         }
     }
 } finally {
     Write-Host "[stop] Shutting down all services..." -ForegroundColor Yellow
-    $TrackerJob, $FsJob, $MemJob, $MaliciousJob | Stop-Job -ErrorAction SilentlyContinue
-    $TrackerJob, $FsJob, $MemJob, $MaliciousJob | Remove-Job -ErrorAction SilentlyContinue
+    $FsJob, $MemJob, $MaliciousJob | Stop-Job -ErrorAction SilentlyContinue
+    $FsJob, $MemJob, $MaliciousJob | Remove-Job -ErrorAction SilentlyContinue
     Write-Host "[stop] All services stopped." -ForegroundColor Green
 }

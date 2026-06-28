@@ -1,408 +1,960 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TaintDog</title>
-  
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            surface: '#ffffff',
-            'surface-dim': '#f6f6f4',
-            outline: '#000000',
-            'outline-variant': '#aaaaaa',
-            primary: '#000000',
-            'primary-on': '#ffffff',
-            secondary: '#ffcfb3',
-            'secondary-on': '#000000',
-            error: '#ff3b30',
-            'error-container': '#ffebe9',
-            'error-onContainer': '#d70015',
-            muted: '#666666'
-          },
-          fontFamily: {
-            sans: ['"Instrument Sans"', 'sans-serif'],
-            mono: ['"JetBrains Mono"', 'monospace']
-          },
-          borderRadius: {
-            none: '0',
-            sm: '4px',
-            DEFAULT: '8px',
-            md: '12px',
-            lg: '16px',
-            xl: '24px',
-            full: '999px'
-          },
-          boxShadow: {
-            card: '0 8px 32px rgba(0, 0, 0, 0.08)',
-            overlay: '0 24px 64px rgba(0, 0, 0, 0.18)',
-            stack: '0 8px 0 -1px #f6f6f4, 0 8px 0 0 #000000'
-          }
-        }
-      }
-    }
-  </script>
-  <link href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" rel="stylesheet" />
-  <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
-  <style>
-    .bg-dot-grid {
-      background-image: radial-gradient(circle at 1px 1px, #dad8de 1px, transparent 0);
-      background-size: 18px 18px;
-    }
-    #graph-container, .vis-network { outline: none; }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #aaaaaa; border-radius: 999px; }
-    ::-webkit-scrollbar-thumb:hover { background: #000000; }
-  </style>
-</head>
-<body class="bg-surface overflow-hidden h-screen flex flex-col font-sans antialiased text-primary">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>TaintDog</title>
 
-  <!-- Navbar -->
-  <nav class="fixed top-0 z-50 w-full bg-surface border-b-[1.5px] border-outline h-16 shrink-0 flex items-center justify-between px-6 shadow-sm">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-on">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2L3 7v5c0 5.25 3.75 10.14 9 11.43C17.25 22.14 21 17.25 21 12V7l-9-5z"/><path d="M9 12l2 2 4-4" opacity=".6"/>
-          </svg>
-        </div>
-        <div>
-          <span class="block text-xl font-bold tracking-tight">TaintDog</span>
-        </div>
-        
-        <!-- Detection Tiers Dropdown -->
-        <div class="hidden md:flex items-center gap-2 ml-6 pl-6 border-l-[1.5px] border-outline relative">
-          <button id="tiersDropdownBtn" data-dropdown-toggle="tiersDropdown" class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold">
-            Detection Tiers
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-          <div id="tiersDropdown" class="z-50 hidden bg-surface border-[1.5px] border-outline rounded-lg shadow-overlay w-72">
-            <div class="p-3 border-b-[1.5px] border-outline">
-              <div class="text-xs font-bold uppercase tracking-wider text-muted mb-2">Flow Engine Tiers</div>
-              <ul class="space-y-2 text-sm font-mono">
-                <li>
-                  <label class="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" id="tier-explicit" class="accent-black w-4 h-4" checked onchange="toggleTier('explicit', this.checked)">
-                    <span class="font-bold">Explicit</span> <span class="text-muted text-[10px]">Exact Match</span>
-                  </label>
-                </li>
-                <li>
-                  <label class="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" id="tier-lexical" class="accent-black w-4 h-4" checked onchange="toggleTier('lexical', this.checked)">
-                    <span class="font-bold">Lexical</span> <span class="text-muted text-[10px]">Fuzzy Match</span>
-                  </label>
-                </li>
-                <li>
-                  <label class="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" id="tier-semantic" class="accent-black w-4 h-4" checked onchange="toggleTier('semantic', this.checked)">
-                    <span class="font-bold">Semantic</span> <span class="text-muted text-[10px]">LLM Embeddings</span>
-                  </label>
-                </li>
-              </ul>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script>
+            tailwind.config = {
+                darkMode: "class",
+                theme: {
+                    extend: {
+                        colors: {
+                            surface: "#ffffff",
+                            "surface-dim": "#f6f6f4",
+                            outline: "#000000",
+                            "outline-variant": "#aaaaaa",
+                            primary: "#000000",
+                            "primary-on": "#ffffff",
+                            secondary: "#ffcfb3",
+                            "secondary-on": "#000000",
+                            error: "#ff3b30",
+                            "error-container": "#ffebe9",
+                            "error-onContainer": "#d70015",
+                            muted: "#666666",
+                        },
+                        fontFamily: {
+                            sans: ['"Instrument Sans"', "sans-serif"],
+                            mono: ['"JetBrains Mono"', "monospace"],
+                        },
+                        borderRadius: {
+                            none: "0",
+                            sm: "4px",
+                            DEFAULT: "8px",
+                            md: "12px",
+                            lg: "16px",
+                            xl: "24px",
+                            full: "999px",
+                        },
+                        boxShadow: {
+                            card: "0 8px 32px rgba(0, 0, 0, 0.08)",
+                            overlay: "0 24px 64px rgba(0, 0, 0, 0.18)",
+                            stack: "0 8px 0 -1px #f6f6f4, 0 8px 0 0 #000000",
+                        },
+                    },
+                },
+            };
+        </script>
+        <link
+            href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css"
+            rel="stylesheet"
+        />
+        <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+        <style>
+            .bg-dot-grid {
+                background-image: radial-gradient(
+                    circle at 1px 1px,
+                    #dad8de 1px,
+                    transparent 0
+                );
+                background-size: 18px 18px;
+            }
+            #graph-container,
+            .vis-network {
+                outline: none;
+            }
+            ::-webkit-scrollbar {
+                width: 6px;
+                height: 6px;
+            }
+            ::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            ::-webkit-scrollbar-thumb {
+                background: #aaaaaa;
+                border-radius: 999px;
+            }
+            ::-webkit-scrollbar-thumb:hover {
+                background: #000000;
+            }
+        </style>
+    </head>
+    <body
+        class="bg-surface overflow-hidden h-screen flex flex-col font-sans antialiased text-primary"
+    >
+        <!-- Navbar -->
+        <nav
+            class="fixed top-0 z-50 w-full bg-surface border-b-[1.5px] border-outline h-16 shrink-0 flex items-center justify-between px-6 shadow-sm"
+        >
+            <div class="flex items-center gap-3">
+                <div
+                    class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-on"
+                >
+                    <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M12 2L3 7v5c0 5.25 3.75 10.14 9 11.43C17.25 22.14 21 17.25 21 12V7l-9-5z"
+                        />
+                        <path d="M9 12l2 2 4-4" opacity=".6" />
+                    </svg>
+                </div>
+                <div>
+                    <span class="block text-xl font-bold tracking-tight"
+                        >TaintDog</span
+                    >
+                </div>
+
+                <!-- Detection Tiers Dropdown -->
+                <div
+                    class="hidden md:flex items-center gap-2 ml-6 pl-6 border-l-[1.5px] border-outline relative"
+                >
+                    <button
+                        id="tiersDropdownBtn"
+                        data-dropdown-toggle="tiersDropdown"
+                        class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold"
+                    >
+                        Detection Tiers
+                        <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                    </button>
+                    <div
+                        id="tiersDropdown"
+                        class="z-50 hidden bg-surface border-[1.5px] border-outline rounded-lg shadow-overlay w-72"
+                    >
+                        <div class="p-3 border-b-[1.5px] border-outline">
+                            <div
+                                class="text-xs font-bold uppercase tracking-wider text-muted mb-2"
+                            >
+                                Flow Engine Tiers
+                            </div>
+                            <ul class="space-y-2 text-sm font-mono">
+                                <li>
+                                    <label
+                                        class="flex items-center gap-2 cursor-pointer"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            id="tier-explicit"
+                                            class="accent-black w-4 h-4"
+                                            checked
+                                            onchange="
+                                                toggleTier(
+                                                    'explicit',
+                                                    this.checked,
+                                                )
+                                            "
+                                        />
+                                        <span class="font-bold">Explicit</span>
+                                        <span class="text-muted text-[10px]"
+                                            >Exact Match</span
+                                        >
+                                    </label>
+                                </li>
+                                <li>
+                                    <label
+                                        class="flex items-center gap-2 cursor-pointer"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            id="tier-lexical"
+                                            class="accent-black w-4 h-4"
+                                            checked
+                                            onchange="
+                                                toggleTier(
+                                                    'lexical',
+                                                    this.checked,
+                                                )
+                                            "
+                                        />
+                                        <span class="font-bold">Lexical</span>
+                                        <span class="text-muted text-[10px]"
+                                            >Fuzzy Match</span
+                                        >
+                                    </label>
+                                </li>
+                                <li>
+                                    <label
+                                        class="flex items-center gap-2 cursor-pointer"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            id="tier-semantic"
+                                            class="accent-black w-4 h-4"
+                                            checked
+                                            onchange="
+                                                toggleTier(
+                                                    'semantic',
+                                                    this.checked,
+                                                )
+                                            "
+                                        />
+                                        <span class="font-bold">Semantic</span>
+                                        <span class="text-muted text-[10px]"
+                                            >LLM Embeddings</span
+                                        >
+                                    </label>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="p-3">
+                            <div
+                                class="text-xs font-bold uppercase tracking-wider text-muted mb-2"
+                            >
+                                Detection Tiers
+                            </div>
+                            <div
+                                id="detection-tiers-list"
+                                class="space-y-1 text-xs font-mono text-muted"
+                            >
+                                <div
+                                    class="animate-pulse h-12 bg-surface-dim rounded"
+                                ></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="p-3">
-              <div class="text-xs font-bold uppercase tracking-wider text-muted mb-2">Detection Tiers</div>
-              <div id="detection-tiers-list" class="space-y-1 text-xs font-mono text-muted">
-                <div class="animate-pulse h-12 bg-surface-dim rounded"></div>
-              </div>
+
+            <div class="flex items-center gap-3">
+                <div
+                    class="flex items-center gap-2 px-3 py-1.5 rounded-full border-[1.5px] border-outline shadow-stack bg-surface"
+                >
+                    <span
+                        id="status-dot"
+                        class="w-2.5 h-2.5 bg-secondary rounded-full animate-pulse"
+                    ></span>
+                    <span
+                        id="status-text"
+                        class="text-xs font-mono font-medium tracking-widest uppercase"
+                        >Idle</span
+                    >
+                </div>
+
+                <button
+                    id="btn-learn"
+                    onclick="runLearningPipeline()"
+                    class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold opacity-50 cursor-not-allowed"
+                    disabled
+                >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
+                    Tune
+                    <span id="tune-badge" class="ml-1.5 px-1.5 py-0.5 text-[9px] font-mono"></span>
+                </button>
+
+                <button
+                    onclick="openRulesModal()"
+                    class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold"
+                >
+                    <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                        />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                    </svg>
+                    YAML Rules
+                </button>
+
+                <button
+                    onclick="openSystemModal()"
+                    class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold"
+                >
+                    <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <rect
+                            x="2"
+                            y="3"
+                            width="20"
+                            height="14"
+                            rx="2"
+                            ry="2"
+                        ></rect>
+                        <line x1="8" y1="21" x2="16" y2="21"></line>
+                        <line x1="12" y1="17" x2="12" y2="21"></line>
+                    </svg>
+                    Systems
+                </button>
+
+                <select
+                    id="sim-dropdown"
+                    class="h-10 px-3 rounded-md border-[1.5px] border-outline bg-surface text-sm font-medium focus:border-outline focus:ring-0 outline-none"
+                >
+                    <option value="" disabled selected>
+                        Select a simulation...
+                    </option>
+                </select>
+
+                <button
+                    id="btn-simulate"
+                    onclick="runSimulation()"
+                    class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-primary text-primary-on hover:bg-secondary hover:text-secondary-on transition-all text-sm font-semibold shadow-stack"
+                >
+                    <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                    >
+                        <polygon points="6,3 20,12 6,21" />
+                    </svg>
+                    Run
+                </button>
+
+                <button
+                    id="btn-reset"
+                    onclick="resetDashboard()"
+                    class="flex items-center justify-center w-10 h-10 rounded-full border-[1.5px] border-outline bg-error-container text-error-onContainer hover:bg-error transition-all text-sm font-semibold"
+                    title="Clear Data"
+                >
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
+                        <path d="M3 6h18" />
+                        <path
+                            d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                        />
+                    </svg>
+                </button>
             </div>
-          </div>
-        </div>
-      </div>
-      
-      <div class="flex items-center gap-3">
-        <div class="flex items-center gap-2 px-3 py-1.5 rounded-full border-[1.5px] border-outline shadow-stack bg-surface">
-          <span id="status-dot" class="w-2.5 h-2.5 bg-secondary rounded-full animate-pulse"></span>
-          <span id="status-text" class="text-xs font-mono font-medium tracking-widest uppercase">Idle</span>
-        </div>
+        </nav>
 
-        <button id="btn-learn" onclick="runLearningPipeline()" class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          Tune
-        </button>
+        <!-- Sidebar & Main -->
+        <div class="flex flex-1 pt-16 h-full overflow-hidden">
+            <!-- Left Sidebar: Metrics -->
+            <aside
+                class="w-80 bg-surface border-r-[1.5px] border-outline flex flex-col shrink-0 overflow-y-auto"
+            >
+                <!-- Metrics -->
+                <div class="p-5 shrink-0">
+                    <h2
+                        class="text-sm font-bold uppercase tracking-wider mb-4 text-muted"
+                    >
+                        Metrics
+                    </h2>
+                    <div class="grid grid-cols-2 gap-3 mb-6">
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                Precision
+                            </div>
+                            <div class="text-xl font-semibold" id="m-precision">
+                                -
+                            </div>
+                        </div>
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                Recall
+                            </div>
+                            <div class="text-xl font-semibold" id="m-recall">
+                                -
+                            </div>
+                        </div>
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                F1 Score
+                            </div>
+                            <div class="text-xl font-semibold" id="m-f1">-</div>
+                        </div>
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                FPR
+                            </div>
+                            <div class="text-xl font-semibold" id="m-fpr">
+                                -
+                            </div>
+                        </div>
+                    </div>
 
-        <button onclick="openRulesModal()" class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-          YAML Rules
-        </button>
+                    <h3
+                        class="text-xs font-bold text-muted uppercase tracking-wider mb-2"
+                    >
+                        Runtime Overhead
+                    </h3>
+                    <div class="grid grid-cols-2 gap-3 mb-6">
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                P50 Lat
+                            </div>
+                            <div class="text-xl font-semibold" id="m-p50">
+                                -
+                            </div>
+                        </div>
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                P95 Lat
+                            </div>
+                            <div class="text-xl font-semibold" id="m-p95">
+                                -
+                            </div>
+                        </div>
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                Memory
+                            </div>
+                            <div class="text-xl font-semibold" id="m-memory">
+                                -
+                            </div>
+                        </div>
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                Attr Cost
+                            </div>
+                            <div class="text-xl font-semibold" id="m-attr-cost">
+                                -
+                            </div>
+                        </div>
+                    </div>
 
-        <button id="btn-reset" onclick="resetDashboard()" class="flex items-center justify-center w-10 h-10 rounded-full border-[1.5px] border-outline bg-error-container text-error-onContainer hover:bg-error transition-all text-sm font-semibold" title="Clear Data">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-        </button>
+                    <h3
+                        class="text-xs font-bold text-muted uppercase tracking-wider mb-2"
+                    >
+                        Flow Attribution
+                    </h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                Explicit
+                            </div>
+                            <div class="text-xl font-semibold" id="m-explicit">
+                                -
+                            </div>
+                        </div>
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                Lexical
+                            </div>
+                            <div class="text-xl font-semibold" id="m-lexical">
+                                -
+                            </div>
+                        </div>
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                Semantic
+                            </div>
+                            <div class="text-xl font-semibold" id="m-semantic">
+                                -
+                            </div>
+                        </div>
+                        <div
+                            class="p-3 rounded border-[1.5px] border-outline bg-surface-dim"
+                        >
+                            <div class="text-xs text-muted font-mono mb-1">
+                                Avg Conf
+                            </div>
+                            <div
+                                class="text-xl font-semibold"
+                                id="m-confidence"
+                            >
+                                -
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
 
-        <button onclick="openSystemModal()" class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-surface hover:bg-surface-dim transition-all text-sm font-semibold">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-          Systems
-        </button>
-
-        <select id="sim-dropdown" class="h-10 px-3 rounded-md border-[1.5px] border-outline bg-surface text-sm font-medium focus:border-outline focus:ring-0 outline-none">
-          <option value="" disabled selected>Select a simulation...</option>
-        </select>
-
-        <button id="btn-simulate" onclick="runSimulation()" class="flex items-center gap-2 px-[18px] py-[10px] h-10 rounded-full border-[1.5px] border-outline bg-primary text-primary-on hover:bg-secondary hover:text-secondary-on transition-all text-sm font-semibold shadow-stack">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21"/></svg>
-          Run
-        </button>
-      </div>
-  </nav>
-
-  <!-- Sidebar & Main -->
-  <div class="flex flex-1 pt-16 h-full overflow-hidden">
-    
-    <!-- Left Sidebar: Metrics -->
-    <aside class="w-80 bg-surface border-r-[1.5px] border-outline flex flex-col shrink-0 overflow-y-auto">
-      
-      <!-- Metrics -->
-      <div class="p-5 shrink-0">
-        <h2 class="text-sm font-bold uppercase tracking-wider mb-4 text-muted">Metrics</h2>
-        <div class="grid grid-cols-2 gap-3 mb-6">
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">Precision</div>
-            <div class="text-xl font-semibold" id="m-precision">-</div>
-          </div>
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">Recall</div>
-            <div class="text-xl font-semibold" id="m-recall">-</div>
-          </div>
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">F1 Score</div>
-            <div class="text-xl font-semibold" id="m-f1">-</div>
-          </div>
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">FPR</div>
-            <div class="text-xl font-semibold" id="m-fpr">-</div>
-          </div>
-        </div>
-
-        <h3 class="text-xs font-bold text-muted uppercase tracking-wider mb-2">Runtime Overhead</h3>
-        <div class="grid grid-cols-2 gap-3 mb-6">
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">P50 Lat</div>
-            <div class="text-xl font-semibold" id="m-p50">-</div>
-          </div>
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">P95 Lat</div>
-            <div class="text-xl font-semibold" id="m-p95">-</div>
-          </div>
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">Memory</div>
-            <div class="text-xl font-semibold" id="m-memory">-</div>
-          </div>
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">Attr Cost</div>
-            <div class="text-xl font-semibold" id="m-attr-cost">-</div>
-          </div>
-        </div>
-
-        <h3 class="text-xs font-bold text-muted uppercase tracking-wider mb-2">Flow Attribution</h3>
-        <div class="grid grid-cols-2 gap-3">
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">Explicit</div>
-            <div class="text-xl font-semibold" id="m-explicit">-</div>
-          </div>
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">Lexical</div>
-            <div class="text-xl font-semibold" id="m-lexical">-</div>
-          </div>
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">Semantic</div>
-            <div class="text-xl font-semibold" id="m-semantic">-</div>
-          </div>
-          <div class="p-3 rounded border-[1.5px] border-outline bg-surface-dim">
-            <div class="text-xs text-muted font-mono mb-1">Avg Conf</div>
-            <div class="text-xl font-semibold" id="m-confidence">-</div>
-          </div>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Main Content: Graph -->
-    <main class="relative flex-1 flex flex-col bg-dot-grid overflow-hidden">
-      <!-- Graph Toolbar -->
-      <div class="absolute top-4 left-4 z-10 flex gap-2">
-        <button id="btn-layout" class="px-3 py-1.5 rounded border-[1.5px] border-outline bg-surface hover:bg-surface-dim text-xs font-mono font-medium shadow-stack" onclick="toggleLayout()">Auto Layout: ON</button>
-        <button id="btn-center" class="px-3 py-1.5 rounded border-[1.5px] border-outline bg-surface hover:bg-surface-dim text-xs font-mono font-medium shadow-stack" onclick="centerGraph()">Center View</button>
-      </div>
-      
-      <!-- Graph Legend -->
-      <div class="absolute bottom-4 left-4 z-10 bg-surface border-[1.5px] border-outline rounded p-3 shadow-stack">
-        <h4 class="text-xs font-bold uppercase tracking-wider text-muted mb-2">Flow Types</h4>
-        <div class="space-y-1.5 text-xs font-mono">
-            <div class="flex items-center gap-2"><span class="w-4 h-0.5 bg-[#a3a3a3]"></span> Explicit (Exact Match)</div>
-            <div class="flex items-center gap-2"><span class="w-4 h-0.5 bg-amber-500"></span> Lexical (Fuzzy Match)</div>
-            <div class="flex items-center gap-2"><span class="w-4 h-0.5 bg-red-500"></span> Semantic (LLM Embeddings)</div>
-        </div>
-      </div>
-      
-      <div id="graph-panel" class="absolute inset-0 w-full h-full"></div>
-    </main>
-
-    <!-- Right Sidebar: Systems, Sessions & Alerts -->
-    <aside class="w-80 bg-surface border-l-[1.5px] border-outline flex flex-col shrink-0 shadow-[-8px_0_32px_rgba(0,0,0,0.05)]">
-      
-      <!-- Systems -->
-      <div class="border-b-[1.5px] border-outline">
-        <div class="p-4 pb-2">
-          <h2 class="text-sm font-bold uppercase tracking-wider text-muted flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-            Systems
-          </h2>
-        </div>
-        <div class="max-h-32 overflow-y-auto px-4 pb-3 space-y-2" id="systems-list"></div>
-      </div>
-      
-      <!-- Sessions -->
-      <div class="border-b-[1.5px] border-outline">
-        <div class="p-4 pb-2">
-          <h2 class="text-sm font-bold uppercase tracking-wider text-muted">Sessions</h2>
-        </div>
-        <div class="max-h-44 overflow-y-auto px-4 pb-3 space-y-2" id="session-list"></div>
-      </div>
-
-      <!-- Live Alerts -->
-      <div class="flex-1 overflow-y-auto p-5 bg-surface-dim">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-sm font-bold uppercase tracking-wider text-muted">Alert Feed</h2>
-          <span class="flex h-2 w-2 relative">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-error opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-2 w-2 bg-error"></span>
-          </span>
-        </div>
-        <div id="alert-feed" class="space-y-4"></div>
-      </div>
-    </aside>
-  </div>
-
-  <!-- YAML Rules Modal -->
-  <div id="rules-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full">
-    <div class="relative p-4 w-full max-w-5xl max-h-full">
-        <div class="relative bg-surface rounded-lg shadow-overlay border-[1.5px] border-outline flex flex-col h-[80vh]">
-            <div class="flex items-center justify-between p-4 md:p-5 border-b-[1.5px] border-outline rounded-t shrink-0">
-                <h3 class="text-xl font-bold tracking-tight">Declarative Policy Engine (YAML)</h3>
-                <div class="flex items-center gap-2">
-                    <button id="btn-run-tests" onclick="testAllRules()" class="px-4 py-2 text-sm font-semibold bg-surface border-[1.5px] border-outline rounded-full hover:bg-surface-dim shadow-stack transition-all">Run Tests</button>
-                    <button onclick="createNewRule()" class="px-4 py-2 text-sm font-semibold bg-surface border-[1.5px] border-outline rounded-full hover:bg-surface-dim shadow-stack transition-all">+ New Rule</button>
-                    <button type="button" class="text-outline-variant hover:text-primary rounded-lg text-sm w-8 h-8 inline-flex justify-center items-center" data-modal-hide="rules-modal">
-                        <svg class="w-3 h-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"/></svg>
+            <!-- Main Content: Graph -->
+            <main
+                class="relative flex-1 flex flex-col bg-dot-grid overflow-hidden"
+            >
+                <!-- Graph Toolbar -->
+                <div class="absolute top-4 left-4 z-10 flex gap-2">
+                    <button
+                        id="btn-layout"
+                        class="px-3 py-1.5 rounded border-[1.5px] border-outline bg-surface hover:bg-surface-dim text-xs font-mono font-medium shadow-stack"
+                        onclick="toggleLayout()"
+                    >
+                        Auto Layout: ON
+                    </button>
+                    <button
+                        id="btn-center"
+                        class="px-3 py-1.5 rounded border-[1.5px] border-outline bg-surface hover:bg-surface-dim text-xs font-mono font-medium shadow-stack"
+                        onclick="centerGraph()"
+                    >
+                        Center View
                     </button>
                 </div>
-            </div>
-            <div class="flex flex-1 min-h-0">
-                <!-- Rules List -->
-                <div class="w-1/3 border-r-[1.5px] border-outline bg-surface-dim overflow-y-auto p-4 space-y-2" id="rules-list"></div>
-                <!-- Editor -->
-                <div class="w-2/3 flex flex-col bg-surface">
-                    <div class="flex items-center justify-between p-3 border-b-[1.5px] border-outline shrink-0 bg-surface-dim">
-                        <span id="rule-filename-display" class="text-sm font-mono font-bold text-muted">Select a rule...</span>
-                        <div id="rule-metadata-display" class="flex items-center gap-2 text-[10px] font-mono text-muted"></div>
-                    </div>
-                    <div class="flex-1 p-0 relative">
-                        <textarea id="rule-editor" class="absolute inset-0 w-full h-full p-4 font-mono text-sm bg-black text-[#a6e22e] border-0 focus:ring-0 resize-none outline-none" spellcheck="false"></textarea>
-                    </div>
-                    <div class="p-4 border-t-[1.5px] border-outline flex justify-end shrink-0">
-                        <button id="btn-save-rule" onclick="saveCurrentRule()" class="hidden px-5 py-2 text-sm font-semibold bg-primary text-primary-on border-[1.5px] border-outline rounded-full hover:bg-secondary hover:text-secondary-on shadow-stack transition-all">Save & Compile</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-  </div>
 
-  <!-- Alert Details Modal -->
-  <div id="alert-details-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full">
-    <div class="relative p-4 w-full max-w-3xl max-h-full">
-        <div class="relative bg-surface rounded-lg shadow-overlay border-[1.5px] border-outline">
-            <div class="flex items-center justify-between p-4 md:p-5 border-b-[1.5px] border-outline rounded-t">
-                <h3 class="text-xl font-bold tracking-tight">Alert Details</h3>
-                <button type="button" class="text-outline-variant hover:text-primary rounded-lg text-sm w-8 h-8 inline-flex justify-center items-center" data-modal-hide="alert-details-modal">
-                    <svg class="w-3 h-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"/></svg>
-                </button>
-            </div>
-            <div class="p-6 space-y-6" id="alert-details-content"></div>
-        </div>
-    </div>
-  </div>
-
-  <!-- Register System Modal -->
-  <div id="system-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full">
-    <div class="relative p-4 w-full max-w-lg max-h-full">
-        <div class="relative bg-surface rounded-lg shadow-overlay border-[1.5px] border-outline">
-            <div class="flex items-center justify-between p-4 md:p-5 border-b-[1.5px] border-outline rounded-t">
-                <h3 class="text-xl font-bold tracking-tight">Register System</h3>
-                <button type="button" class="text-outline-variant hover:text-primary rounded-lg text-sm w-8 h-8 inline-flex justify-center items-center" data-modal-hide="system-modal">
-                    <svg class="w-3 h-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"/></svg>
-                </button>
-            </div>
-            <div class="p-4 md:p-5 space-y-4">
-                <div>
-                    <label class="block mb-2 text-sm font-semibold">System Name</label>
-                    <input type="text" id="sys-name" class="bg-surface border-[1.5px] border-outline text-primary text-sm rounded-lg focus:ring-black focus:border-black block w-full p-2.5 font-mono" placeholder="My Production Stack" />
-                </div>
-                <div>
-                    <label class="block mb-2 text-sm font-semibold">Description</label>
-                    <input type="text" id="sys-description" class="bg-surface border-[1.5px] border-outline text-primary text-sm rounded-lg focus:ring-black focus:border-black block w-full p-2.5 font-mono" placeholder="Production MCP deployment with filesystem + database" />
-                </div>
-                <div>
-                    <label class="block mb-2 text-sm font-semibold">Environment</label>
-                    <select id="sys-environment" class="bg-surface border-[1.5px] border-outline text-primary text-sm rounded-lg focus:ring-black focus:border-black block w-full p-2.5 font-mono">
-                        <option value="development">Development</option>
-                        <option value="staging">Staging</option>
-                        <option value="production" selected>Production</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block mb-2 text-sm font-semibold">IP / Domain</label>
-                    <input type="text" id="sys-ip-domain" class="bg-surface border-[1.5px] border-outline text-primary text-sm rounded-lg focus:ring-black focus:border-black block w-full p-2.5 font-mono" placeholder="10.0.0.1 or myapp.internal" />
-                </div>
-                <div>
-                    <div class="flex items-center justify-between mb-2">
-                        <label class="text-sm font-semibold">MCP Servers</label>
-                        <button type="button" onclick="addServerField()" class="text-xs px-3 py-1 border-[1.5px] border-outline rounded-full hover:bg-surface-dim transition-all font-mono">+ Add</button>
-                    </div>
-                    <div id="servers-list" class="space-y-2 max-h-48 overflow-y-auto">
-                        <div class="server-entry p-3 bg-surface-dim border-[1.5px] border-outline-variant rounded-lg">
-                            <div class="grid grid-cols-2 gap-2">
-                                <input type="text" class="srv-name text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono" placeholder="name" value="filesystem-server" />
-                                <input type="text" class="srv-url text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono" placeholder="url" value="http://localhost:8080" />
-                            </div>
-                            <div class="grid grid-cols-2 gap-2 mt-2">
-                                <select class="srv-transport text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono">
-                                    <option value="stdio">stdio</option>
-                                    <option value="sse">sse</option>
-                                    <option value="streamable-http">streamable-http</option>
-                                </select>
-                                <button type="button" onclick="this.closest('.server-entry').remove()" class="text-xs py-1 border-[1.5px] border-error text-error rounded-full hover:bg-error-container transition-all">Remove</button>
-                            </div>
+                <!-- Graph Legend -->
+                <div
+                    class="absolute bottom-4 left-4 z-10 bg-surface border-[1.5px] border-outline rounded p-3 shadow-stack"
+                >
+                    <h4
+                        class="text-xs font-bold uppercase tracking-wider text-muted mb-2"
+                    >
+                        Flow Types
+                    </h4>
+                    <div class="space-y-1.5 text-xs font-mono">
+                        <div class="flex items-center gap-2">
+                            <span class="w-4 h-0.5 bg-[#a3a3a3]"></span>
+                            Explicit (Exact Match)
                         </div>
-                        <div class="server-entry p-3 bg-surface-dim border-[1.5px] border-outline-variant rounded-lg">
-                            <div class="grid grid-cols-2 gap-2">
-                                <input type="text" class="srv-name text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono" placeholder="name" value="db-server" />
-                                <input type="text" class="srv-url text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono" placeholder="url" value="http://localhost:8081" />
-                            </div>
-                            <div class="grid grid-cols-2 gap-2 mt-2">
-                                <select class="srv-transport text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono">
-                                    <option value="stdio">stdio</option>
-                                    <option value="sse">sse</option>
-                                </select>
-                                <button type="button" onclick="this.closest('.server-entry').remove()" class="text-xs py-1 border-[1.5px] border-error text-error rounded-full hover:bg-error-container transition-all">Remove</button>
-                            </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-4 h-0.5 bg-amber-500"></span> Lexical
+                            (Fuzzy Match)
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-4 h-0.5 bg-red-500"></span> Semantic
+                            (LLM Embeddings)
                         </div>
                     </div>
                 </div>
-                <button type="button" class="w-full text-primary-on bg-primary hover:bg-secondary focus:ring-4 focus:outline-none focus:ring-secondary/50 font-semibold rounded-full text-sm px-5 py-2.5 text-center shadow-stack border-[1.5px] border-outline transition-all" onclick="registerSystem()">Register & Monitor</button>
+
+                <div
+                    id="graph-panel"
+                    class="absolute inset-0 w-full h-full"
+                ></div>
+            </main>
+
+            <!-- Right Sidebar: Systems, Sessions & Alerts -->
+            <aside
+                class="w-80 bg-surface border-l-[1.5px] border-outline flex flex-col shrink-0 shadow-[-8px_0_32px_rgba(0,0,0,0.05)]"
+            >
+                <!-- Systems -->
+                <div class="border-b-[1.5px] border-outline">
+                    <div class="p-4 pb-2">
+                        <h2
+                            class="text-sm font-bold uppercase tracking-wider text-muted flex items-center gap-2"
+                        >
+                            <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <rect
+                                    x="2"
+                                    y="3"
+                                    width="20"
+                                    height="14"
+                                    rx="2"
+                                    ry="2"
+                                ></rect>
+                                <line x1="8" y1="21" x2="16" y2="21"></line>
+                                <line x1="12" y1="17" x2="12" y2="21"></line>
+                            </svg>
+                            Systems
+                        </h2>
+                    </div>
+                    <div
+                        class="max-h-48 overflow-y-auto px-4 pb-3 space-y-2"
+                        id="systems-list"
+                    ></div>
+                </div>
+
+                <!-- Sessions -->
+                <div class="border-b-[1.5px] border-outline">
+                    <div class="p-4 pb-2">
+                        <h2
+                            class="text-sm font-bold uppercase tracking-wider text-muted"
+                        >
+                            Sessions
+                        </h2>
+                    </div>
+                    <div
+                        class="max-h-44 overflow-y-auto px-4 pb-3 space-y-2"
+                        id="session-list"
+                    ></div>
+                </div>
+
+                <!-- Live Alerts -->
+                <div class="flex-1 overflow-y-auto p-5 bg-surface-dim">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2
+                            class="text-sm font-bold uppercase tracking-wider text-muted"
+                        >
+                            Alert Feed
+                        </h2>
+                        <span class="flex h-2 w-2 relative">
+                            <span
+                                class="animate-ping absolute inline-flex h-full w-full rounded-full bg-error opacity-75"
+                            ></span>
+                            <span
+                                class="relative inline-flex rounded-full h-2 w-2 bg-error"
+                            ></span>
+                        </span>
+                    </div>
+                    <div id="alert-feed" class="space-y-4"></div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- YAML Rules Modal -->
+        <div
+            id="rules-modal"
+            tabindex="-1"
+            aria-hidden="true"
+            class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full"
+        >
+            <div class="relative p-4 w-full max-w-5xl max-h-full">
+                <div
+                    class="relative bg-surface rounded-lg shadow-overlay border-[1.5px] border-outline flex flex-col h-[80vh]"
+                >
+                    <div
+                        class="flex items-center justify-between p-4 md:p-5 border-b-[1.5px] border-outline rounded-t shrink-0"
+                    >
+                        <h3 class="text-xl font-bold tracking-tight">
+                            Declarative Policy Engine (YAML)
+                        </h3>
+                        <div class="flex items-center gap-2">
+                            <button
+                                id="btn-run-tests"
+                                onclick="testAllRules()"
+                                class="px-4 py-2 text-sm font-semibold bg-surface border-[1.5px] border-outline rounded-full hover:bg-surface-dim shadow-stack transition-all"
+                            >
+                                Run Tests
+                            </button>
+                            <button
+                                onclick="createNewRule()"
+                                class="px-4 py-2 text-sm font-semibold bg-surface border-[1.5px] border-outline rounded-full hover:bg-surface-dim shadow-stack transition-all"
+                            >
+                                + New Rule
+                            </button>
+                            <button
+                                type="button"
+                                class="text-outline-variant hover:text-primary rounded-lg text-sm w-8 h-8 inline-flex justify-center items-center"
+                                data-modal-hide="rules-modal"
+                            >
+                                <svg
+                                    class="w-3 h-3"
+                                    aria-hidden="true"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    fill="none"
+                                    viewBox="0 0 14 14"
+                                >
+                                    <path
+                                        stroke="currentColor"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"
+                                    />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex flex-1 min-h-0">
+                        <!-- Rules List -->
+                        <div
+                            class="w-1/3 border-r-[1.5px] border-outline bg-surface-dim overflow-y-auto p-4 space-y-2"
+                            id="rules-list"
+                        ></div>
+                        <!-- Editor -->
+                        <div class="w-2/3 flex flex-col bg-surface">
+                            <div
+                                class="flex items-center justify-between p-3 border-b-[1.5px] border-outline shrink-0 bg-surface-dim"
+                            >
+                                <span
+                                    id="rule-filename-display"
+                                    class="text-sm font-mono font-bold text-muted"
+                                    >Select a rule...</span
+                                >
+                                <div
+                                    id="rule-metadata-display"
+                                    class="flex items-center gap-2 text-[10px] font-mono text-muted"
+                                ></div>
+                            </div>
+                            <div class="flex-1 p-0 relative">
+                                <textarea
+                                    id="rule-editor"
+                                    class="absolute inset-0 w-full h-full p-4 font-mono text-sm bg-black text-[#a6e22e] border-0 focus:ring-0 resize-none outline-none"
+                                    spellcheck="false"
+                                ></textarea>
+                            </div>
+                            <div
+                                class="p-4 border-t-[1.5px] border-outline flex justify-end shrink-0"
+                            >
+                                <button
+                                    id="btn-save-rule"
+                                    onclick="saveCurrentRule()"
+                                    class="hidden px-5 py-2 text-sm font-semibold bg-primary text-primary-on border-[1.5px] border-outline rounded-full hover:bg-secondary hover:text-secondary-on shadow-stack transition-all"
+                                >
+                                    Save & Compile
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
-    </div>
-  </div>
 
-  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
-  
-  <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
-  <script src="/static/dashboard.js"></script>
-</body>
+        <!-- Alert Details Modal -->
+        <div
+            id="alert-details-modal"
+            tabindex="-1"
+            aria-hidden="true"
+            class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full"
+        >
+            <div class="relative p-4 w-full max-w-3xl max-h-full">
+                <div
+                    class="relative bg-surface rounded-lg shadow-overlay border-[1.5px] border-outline"
+                >
+                    <div
+                        class="flex items-center justify-between p-4 md:p-5 border-b-[1.5px] border-outline rounded-t"
+                    >
+                        <h3 class="text-xl font-bold tracking-tight">
+                            Alert Details
+                        </h3>
+                        <button
+                            type="button"
+                            class="text-outline-variant hover:text-primary rounded-lg text-sm w-8 h-8 inline-flex justify-center items-center"
+                            data-modal-hide="alert-details-modal"
+                        >
+                            <svg
+                                class="w-3 h-3"
+                                aria-hidden="true"
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 14 14"
+                            >
+                                <path
+                                    stroke="currentColor"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"
+                                />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="p-6 space-y-6" id="alert-details-content"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Register System Modal -->
+        <div
+            id="system-modal"
+            tabindex="-1"
+            aria-hidden="true"
+            class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full"
+        >
+            <div class="relative p-4 w-full max-w-lg max-h-full">
+                <div
+                    class="relative bg-surface rounded-lg shadow-overlay border-[1.5px] border-outline"
+                >
+                    <div
+                        class="flex items-center justify-between p-4 md:p-5 border-b-[1.5px] border-outline rounded-t"
+                    >
+                        <h3
+                            class="text-xl font-bold tracking-tight"
+                            id="system-modal-title"
+                        >
+                            Register System
+                        </h3>
+                        <button
+                            type="button"
+                            class="text-outline-variant hover:text-primary rounded-lg text-sm w-8 h-8 inline-flex justify-center items-center"
+                            data-modal-hide="system-modal"
+                        >
+                            <svg
+                                class="w-3 h-3"
+                                aria-hidden="true"
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 14 14"
+                            >
+                                <path
+                                    stroke="currentColor"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"
+                                />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="p-4 md:p-5 space-y-4">
+                        <div>
+                            <label class="block mb-2 text-sm font-semibold"
+                                >System Name</label
+                            >
+                            <input
+                                type="text"
+                                id="sys-name"
+                                class="bg-surface border-[1.5px] border-outline text-primary text-sm rounded-lg focus:ring-black focus:border-black block w-full p-2.5 font-mono"
+                                placeholder="My Production Stack"
+                            />
+                        </div>
+                        <div>
+                            <label class="block mb-2 text-sm font-semibold"
+                                >Description</label
+                            >
+                            <input
+                                type="text"
+                                id="sys-description"
+                                class="bg-surface border-[1.5px] border-outline text-primary text-sm rounded-lg focus:ring-black focus:border-black block w-full p-2.5 font-mono"
+                                placeholder="Production MCP deployment with filesystem + database"
+                            />
+                        </div>
+                        <div>
+                            <label class="block mb-2 text-sm font-semibold"
+                                >Environment</label
+                            >
+                            <select
+                                id="sys-environment"
+                                class="bg-surface border-[1.5px] border-outline text-primary text-sm rounded-lg focus:ring-black focus:border-black block w-full p-2.5 font-mono"
+                            >
+                                <option value="development">Development</option>
+                                <option value="staging">Staging</option>
+                                <option value="production" selected>
+                                    Production
+                                </option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block mb-2 text-sm font-semibold"
+                                >IP / Domain</label
+                            >
+                            <input
+                                type="text"
+                                id="sys-ip-domain"
+                                class="bg-surface border-[1.5px] border-outline text-primary text-sm rounded-lg focus:ring-black focus:border-black block w-full p-2.5 font-mono"
+                                placeholder="10.0.0.1 or myapp.internal"
+                            />
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <label class="text-sm font-semibold"
+                                    >MCP Servers</label
+                                >
+                                <button
+                                    type="button"
+                                    onclick="addServerField()"
+                                    class="text-xs px-3 py-1 border-[1.5px] border-outline rounded-full hover:bg-surface-dim transition-all font-mono"
+                                >
+                                    + Add
+                                </button>
+                            </div>
+                            <div
+                                id="servers-list"
+                                class="space-y-2 max-h-48 overflow-y-auto"
+                            >
+                                <div
+                                    class="server-entry p-3 bg-surface-dim border-[1.5px] border-outline-variant rounded-lg"
+                                >
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <input
+                                            type="text"
+                                            class="srv-name text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono"
+                                            placeholder="filesystem-server"
+                                            value=""
+                                        />
+                                        <input
+                                            type="text"
+                                            class="srv-url text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono"
+                                            placeholder="http://localhost:3100"
+                                            value=""
+                                        />
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-2 mt-2">
+                                        <select
+                                            class="srv-transport text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono"
+                                        >
+                                            <option value="stdio">stdio</option>
+                                            <option value="sse" selected>
+                                                sse
+                                            </option>
+                                            <option value="streamable-http">
+                                                streamable-http
+                                            </option>
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onclick="
+                                                this.closest(
+                                                    '.server-entry',
+                                                ).remove()
+                                            "
+                                            class="text-xs py-1 border-[1.5px] border-error text-error rounded-full hover:bg-error-container transition-all"
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            class="register-btn w-full text-primary-on bg-primary hover:bg-secondary focus:ring-4 focus:outline-none focus:ring-secondary/50 font-semibold rounded-full text-sm px-5 py-2.5 text-center shadow-stack border-[1.5px] border-outline transition-all"
+                            onclick="registerSystem()"
+                        >
+                            Register & Monitor
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div
+            id="toast-container"
+            class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"
+        ></div>
+
+        <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
+        <script src="/static/dashboard.js"></script>
+    </body>
 </html>

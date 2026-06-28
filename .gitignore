@@ -1,14 +1,57 @@
+# ── Python Byte-Compiled ─────────────────────────────────────────────
 __pycache__/
-venv/
-env/
-.env
-models/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-.Python
+*.egg-info/
+*.egg
+dist/
+build/
+
+# ── Virtual Environments ─────────────────────────────────────────────
+venv/
+env/
+.venv/
+.env/
+.venv_*/
+pythonenv*
+
+# ── Secrets & Config ─────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.cert
+secrets/
+
+# ── IDE / Editor ─────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── OS Artifacts ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ── Model Assets (downloaded by sentence-transformers at runtime) ────
+models/
+
+# ── Data Files (regenerated) ─────────────────────────────────────────
 *.db
 *.sqlite3
 truth_matrix.csv
 optimized_thresholds.json
 server.log
+nohup.out
+
+# ── Docker ───────────────────────────────────────────────────────────
+.docker/
+docker-compose.override.yml

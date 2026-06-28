@@ -9,7 +9,7 @@ pattern:
     max_hops: 5
     requires_taint: true
   sink:
-    tools: ["http_request", "http_post", "webhook"]
+    tools: ["http_request", "http_post", "webhook", "filesystem_write"]
 test:
   positive:
     - description: "Filesystem read → HTTP request exfiltration"

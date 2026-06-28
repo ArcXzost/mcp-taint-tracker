@@ -34,6 +34,7 @@ class CUSUMDetector:
     in false positive rate between consecutive optimization runs.
     
     Signals drift when cumulative deviation from target exceeds threshold.
+    Each rule gets its own detector to prevent signal contamination.
     """
     
     def __init__(self, target_fp_rate: float = 0.05, threshold: float = 3.0):
@@ -48,7 +49,6 @@ class CUSUMDetector:
         self.total_samples += 1
         deviation = fp_rate - self.target
         
-        # CUSUM upper and lower statistics
         self.cumulative_positive = max(0.0, self.cumulative_positive + deviation - 0.5 * self.threshold)
         self.cumulative_negative = min(0.0, self.cumulative_negative + deviation + 0.5 * self.threshold)
         
@@ -63,7 +63,7 @@ class CUSUMDetector:
         }
 
 
-CUSUM = CUSUMDetector(target_fp_rate=0.05, threshold=3.0)
+_CUSUM_REGISTRY: Dict[str, CUSUMDetector] = {}
 
 
 # ── Threshold History (for rollback) ──────────────────────────────────────────
@@ -110,6 +110,7 @@ def optimize_threshold(
     method: str,
     default: float,
     rule_name: str = "_global",
+    force: bool = False,
 ) -> Dict[str, Any]:
     """
     Optimize a threshold using Time-Weighted F3 Score.
@@ -117,20 +118,20 @@ def optimize_threshold(
     Returns both the optimal threshold and an explanation of why.
     If insufficient data, returns default with 'insufficient' status.
     """
-    MIN_SAMPLES = MIN_GLOBAL_SAMPLES if rule_name == "_global" else MIN_RULE_SAMPLES
+    min_samples = 1 if force else (MIN_GLOBAL_SAMPLES if rule_name == "_global" else MIN_RULE_SAMPLES)
     
     result = {
         "threshold": default,
         "previous_threshold": default,
         "f3_score": 0.0,
         "samples": len(data),
-        "status": "insufficient_data",
-        "explanation": f"Need {MIN_SAMPLES} samples, have {len(data)}",
+        "status": "insufficient_data" if not force else "optimized",
+        "explanation": f"Need {min_samples} samples, have {len(data)}",
         "drift": {"drift_detected": False},
         "rollback_applied": False,
     }
     
-    if len(data) < MIN_SAMPLES:
+    if len(data) < min_samples:
         return result
     
     best_threshold = default
@@ -163,10 +164,12 @@ def optimize_threshold(
             best_threshold = t
             tp_w_total, fp_w_total, fn_w_total = tp_w, fp_w, fn_w
     
-    # Check drift (FP rate)
+    # Check drift (FP rate) — per-rule CUSUM to avoid signal contamination
     total_classified = tp_w_total + fp_w_total
     fp_rate = fp_w_total / total_classified if total_classified > 0 else 0.0
-    drift_status = CUSUM.update(fp_rate)
+    if rule_name not in _CUSUM_REGISTRY:
+        _CUSUM_REGISTRY[rule_name] = CUSUMDetector(target_fp_rate=0.05, threshold=3.0)
+    drift_status = _CUSUM_REGISTRY[rule_name].update(fp_rate)
     result["drift"] = drift_status
     
     # Load previous thresholds for comparison
@@ -234,13 +237,14 @@ def optimize_threshold(
     return result
 
 
-def main(shadow_mode: bool = False) -> Optional[Dict[str, Any]]:
+def main(shadow_mode: bool = False, force: bool = False) -> Optional[Dict[str, Any]]:
     """
     Run the learning pipeline.
     
     Args:
         shadow_mode: If True, compute recommendations but do NOT deploy them.
             Use for initial periods to validate without risk.
+        force: If True, skip minimum data checks and optimize with whatever is available.
     
     Returns: Optimized thresholds dict, or None if insufficient data.
     """
@@ -256,6 +260,8 @@ def main(shadow_mode: bool = False) -> Optional[Dict[str, Any]]:
     # Structure: rule_name -> { "semantic": [(conf, label, weight)], "lexical": [...] }
     rule_data: Dict[str, Dict[str, List[Tuple[float, int, float]]]] = {}
     total_samples = 0
+    sem_samples = 0
+    lex_samples = 0
     
     with open("truth_matrix.csv", mode="r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -274,14 +280,19 @@ def main(shadow_mode: bool = False) -> Optional[Dict[str, Any]]:
                 if method in ("semantic", "lexical"):
                     rule_data[rule_name][method].append((conf, label, weight))
                     total_samples += 1
+                    if method == "semantic":
+                        sem_samples += 1
+                    else:
+                        lex_samples += 1
             except Exception as e:
                 print(f"[LEARN] Skipping malformed row: {e}")
                 continue
     
-    print(f"[LEARN] Loaded {total_samples} labeled samples across {len(rule_data)} rules")
+    print(f"[LEARN] Loaded {total_samples} labeled samples ({sem_samples} semantic, {lex_samples} lexical) across {len(rule_data)} rules")
     
-    if total_samples < MIN_GLOBAL_SAMPLES:
-        print(f"[LEARN] Insufficient data: {total_samples}/{MIN_GLOBAL_SAMPLES} samples needed. Skipping.")
+    needed = MIN_GLOBAL_SAMPLES if not force else 1
+    if total_samples < needed:
+        print(f"[LEARN] Insufficient data: {total_samples}/{MIN_GLOBAL_SAMPLES} samples needed. Use --force to override.")
         return None
     
     # ── Global baselines ──────────────────────────────────────────────────
@@ -291,8 +302,8 @@ def main(shadow_mode: bool = False) -> Optional[Dict[str, Any]]:
         global_semantic.extend(data["semantic"])
         global_lexical.extend(data["lexical"])
     
-    sem_result = optimize_threshold(global_semantic, "semantic", 0.55, "_global")
-    lex_result = optimize_threshold(global_lexical, "lexical", 0.75, "_global")
+    sem_result = optimize_threshold(global_semantic, "semantic", 0.55, "_global", force=force)
+    lex_result = optimize_threshold(global_lexical, "lexical", 0.75, "_global", force=force)
     
     print(f"[LEARN] Global Semantic: {sem_result['threshold']:.2f} ({sem_result['status']})")
     print(f"         {sem_result['explanation']}")
@@ -307,8 +318,8 @@ def main(shadow_mode: bool = False) -> Optional[Dict[str, Any]]:
     all_explanations = []
     
     for rule_name, data in rule_data.items():
-        sem_result = optimize_threshold(data["semantic"], "semantic", global_sem_t, rule_name)
-        lex_result = optimize_threshold(data["lexical"], "lexical", global_lex_t, rule_name)
+        sem_result = optimize_threshold(data["semantic"], "semantic", global_sem_t, rule_name, force=force)
+        lex_result = optimize_threshold(data["lexical"], "lexical", global_lex_t, rule_name, force=force)
         
         optimized_rules[rule_name] = {
             "semantic_threshold": sem_result["threshold"],
@@ -331,11 +342,8 @@ def main(shadow_mode: bool = False) -> Optional[Dict[str, Any]]:
         "_global": {
             "semantic_threshold": global_sem_t,
             "lexical_threshold": global_lex_t,
-            "semantic_f3": round(compute_f3(
-                sum(1 for _, l, _ in global_semantic if l == 1) / max(len(global_semantic), 1),
-                sum(1 for _, l, _ in global_semantic if l == 1) / max(sum(1 for _, l, _ in global_semantic if l == 1) + sum(1 for _, l, _ in global_semantic if l == 0), 1)
-            ) if global_semantic else 0.0, 4),
-            "lexical_f3": 0.0,
+            "semantic_f3": sem_result["f3_score"],
+            "lexical_f3": lex_result["f3_score"],
         },
         "rules": optimized_rules,
         "metadata": {
@@ -373,4 +381,4 @@ if __name__ == "__main__":
     parser.add_argument("--shadow", action="store_true", help="Run in shadow mode (don't deploy)")
     parser.add_argument("--force", action="store_true", help="Skip minimum data checks")
     args = parser.parse_args()
-    main(shadow_mode=args.shadow)
+    main(shadow_mode=args.shadow, force=args.force)

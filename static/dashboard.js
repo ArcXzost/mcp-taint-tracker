@@ -8,6 +8,7 @@ let network = null;
 document.addEventListener("DOMContentLoaded", async () => {
     await initSimulations();
     await loadConfig();
+    await refreshLearningStatus();
     startPolling();
 
     const container = document.getElementById("graph-panel");
@@ -27,13 +28,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 function startPolling() {
     if (pollingInterval) clearInterval(pollingInterval);
     pollingInterval = setInterval(() => {
-        refreshSystems();
-        refreshSessions();
-        refreshMetrics();
-        if (currentSessionId) {
-            refreshGraph(currentSessionId);
-            refreshAlerts(currentSessionId);
-        }
+    refreshSystems();
+    refreshSessions();
+    refreshMetrics();
+    refreshLearningStatus();
+    if (currentSessionId) {
+        refreshGraph(currentSessionId);
+        refreshAlerts(currentSessionId);
+    }
     }, 3000);
     refreshSystems();
     refreshSessions();
@@ -63,16 +65,39 @@ function renderSystemsList(systems) {
     container.innerHTML = systems.map(s => {
         const envColors = { development: "bg-amber-100 text-amber-800 border-amber-300", staging: "bg-blue-100 text-blue-800 border-blue-300", production: "bg-green-100 text-green-800 border-green-300" };
         const envColor = envColors[s.environment] || "bg-gray-100 text-gray-800 border-gray-300";
+        const servers = s.servers || [];
         return `
             <div class="p-2 bg-surface border-[1.5px] border-outline rounded-lg">
                 <div class="flex items-center justify-between mb-1">
-                    <span class="font-bold text-xs truncate">${s.name}</span>
-                    <span class="px-1.5 py-0.5 text-[9px] font-mono border rounded-full ${envColor}">${s.environment}</span>
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <span class="font-bold text-xs truncate">${s.name}</span>
+                        <span class="px-1.5 py-0.5 text-[9px] font-mono border rounded-full ${envColor} shrink-0">${s.environment}</span>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button onclick='openEditSystemModal("${s.name}")' class="p-0.5 hover:bg-surface-dim rounded transition-all" title="Edit system">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        </button>
+                        <button onclick='deleteSystem("${s.name}")' class="p-0.5 hover:bg-error-container rounded transition-all text-error" title="Delete system">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                    </div>
                 </div>
-                <div class="flex items-center gap-2 text-[10px] font-mono text-muted">
-                    <span>${s.server_count} server${s.server_count !== 1 ? 's' : ''}</span>
+                <div class="flex items-center gap-2 text-[10px] font-mono text-muted mb-1">
+                    <span>${servers.length} server${servers.length !== 1 ? 's' : ''}</span>
                     ${s.ip_domain ? `<span>• ${s.ip_domain}</span>` : ''}
+                    ${s.description ? `<span class="truncate max-w-[120px]">• ${s.description}</span>` : ''}
                 </div>
+                ${servers.length > 0 ? `
+                <div class="space-y-1 mt-1.5">
+                    ${servers.map(srv => `
+                        <div class="flex items-center gap-1.5 text-[9px] font-mono text-muted bg-surface-dim rounded px-1.5 py-1">
+                            <span class="inline-block w-1.5 h-1.5 rounded-full ${srv.connected ? 'bg-green-400' : 'bg-gray-300'} shrink-0"></span>
+                            <span class="font-semibold truncate max-w-[90px]">${srv.name}</span>
+                            <span class="text-outline-variant truncate max-w-[70px]">${srv.url || ''}</span>
+                            <span class="text-[8px] uppercase tracking-wider ${srv.transport === 'sse' ? 'text-blue-500' : 'text-muted'}">${srv.transport || ''}</span>
+                        </div>
+                    `).join('')}
+                </div>` : ''}
             </div>
         `;
     }).join("");
@@ -81,6 +106,83 @@ function renderSystemsList(systems) {
 let systemModalInstance = null;
 
 function openSystemModal() {
+    clearSystemForm();
+    const modalTitle = document.getElementById('system-modal-title');
+    if (modalTitle) modalTitle.textContent = 'Register System';
+    const btn = document.querySelector('#system-modal .register-btn');
+    if (btn) { btn.textContent = 'Register & Monitor'; btn.dataset.mode = 'register'; }
+    const modalEl = document.getElementById('system-modal');
+    if (!systemModalInstance) {
+        systemModalInstance = new Modal(modalEl);
+        document.querySelector('#system-modal [data-modal-hide="system-modal"]').addEventListener('click', () => systemModalInstance.hide());
+    }
+    systemModalInstance.show();
+}
+
+function clearSystemForm() {
+    document.getElementById("sys-name").value = "";
+    document.getElementById("sys-description").value = "";
+    document.getElementById("sys-environment").value = "production";
+    document.getElementById("sys-ip-domain").value = "";
+    const container = document.getElementById("servers-list");
+    container.innerHTML = `
+        <div class="server-entry p-3 bg-surface-dim border-[1.5px] border-outline-variant rounded-lg">
+            <div class="grid grid-cols-2 gap-2">
+                <input type="text" class="srv-name text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono" placeholder="name" value="" />
+                <input type="text" class="srv-url text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono" placeholder="url" value="" />
+            </div>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+                <select class="srv-transport text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono">
+                    <option value="stdio">stdio</option>
+                    <option value="sse" selected>sse</option>
+                    <option value="streamable-http">streamable-http</option>
+                </select>
+                <button type="button" onclick="this.closest('.server-entry').remove()" class="text-xs py-1 border-[1.5px] border-error text-error rounded-full hover:bg-error-container transition-all">Remove</button>
+            </div>
+        </div>
+    `;
+}
+
+async function openEditSystemModal(systemName) {
+    clearSystemForm();
+    let system;
+    try {
+        const res = await fetch(`${API_BASE}/api/systems/${encodeURIComponent(systemName)}`);
+        if (!res.ok) { showToast("Failed to load system details.", "error"); return; }
+        system = await res.json();
+    } catch (e) {
+        showToast("Error loading system details.", "error");
+        return;
+    }
+    document.getElementById("sys-name").value = system.name || "";
+    document.getElementById("sys-description").value = system.description || "";
+    document.getElementById("sys-environment").value = system.environment || "production";
+    document.getElementById("sys-ip-domain").value = system.ip_domain || "";
+    const container = document.getElementById("servers-list");
+    container.innerHTML = "";
+    (system.servers || []).forEach(srv => {
+        const entry = document.createElement('div');
+        entry.className = 'server-entry p-3 bg-surface-dim border-[1.5px] border-outline-variant rounded-lg';
+        entry.innerHTML = `
+            <div class="grid grid-cols-2 gap-2">
+                <input type="text" class="srv-name text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono" placeholder="name" value="${srv.name || ''}" />
+                <input type="text" class="srv-url text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono" placeholder="url" value="${srv.url || ''}" />
+            </div>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+                <select class="srv-transport text-xs bg-surface border-[1.5px] border-outline rounded p-1.5 font-mono">
+                    <option value="stdio" ${srv.transport === 'stdio' ? 'selected' : ''}>stdio</option>
+                    <option value="sse" ${srv.transport === 'sse' ? 'selected' : ''}>sse</option>
+                    <option value="streamable-http" ${srv.transport === 'streamable-http' ? 'selected' : ''}>streamable-http</option>
+                </select>
+                <button type="button" onclick="this.closest('.server-entry').remove()" class="text-xs py-1 border-[1.5px] border-error text-error rounded-full hover:bg-error-container transition-all">Remove</button>
+            </div>
+        `;
+        container.appendChild(entry);
+    });
+    const modalTitle = document.getElementById('system-modal-title');
+    if (modalTitle) modalTitle.textContent = 'Edit System';
+    const btn = document.querySelector('#system-modal .register-btn');
+    if (btn) { btn.textContent = 'Update System'; btn.dataset.mode = 'edit'; btn.dataset.editName = systemName; }
     const modalEl = document.getElementById('system-modal');
     if (!systemModalInstance) {
         systemModalInstance = new Modal(modalEl);
@@ -129,28 +231,68 @@ async function registerSystem() {
         showToast("At least one MCP server is required.", "error");
         return;
     }
+    const btn = document.querySelector('#system-modal .register-btn');
+    const mode = btn ? btn.dataset.mode : 'register';
     try {
-        const res = await fetch(`${API_BASE}/api/systems`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                name: name,
-                description: document.getElementById("sys-description").value.trim(),
-                environment: document.getElementById("sys-environment").value,
-                ip_domain: document.getElementById("sys-ip-domain").value.trim(),
-                servers: servers
-            })
-        });
-        if (res.ok) {
-            showToast(`System "${name}" registered!`, "success");
-            if (systemModalInstance) systemModalInstance.hide();
-            await refreshSystems();
+        if (mode === 'edit') {
+            const editName = btn.dataset.editName;
+            const res = await fetch(`${API_BASE}/api/systems/${encodeURIComponent(editName)}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: name,
+                    description: document.getElementById("sys-description").value.trim(),
+                    environment: document.getElementById("sys-environment").value,
+                    ip_domain: document.getElementById("sys-ip-domain").value.trim(),
+                    servers: servers
+                })
+            });
+            if (res.ok) {
+                showToast(`System "${name}" updated!`, "success");
+                if (systemModalInstance) systemModalInstance.hide();
+                await refreshSystems();
+            } else {
+                const err = await res.json();
+                showToast(err.detail || "Failed to update system.", "error");
+            }
         } else {
-            const err = await res.json();
-            showToast(err.detail || "Failed to register system.", "error");
+            const res = await fetch(`${API_BASE}/api/systems`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: name,
+                    description: document.getElementById("sys-description").value.trim(),
+                    environment: document.getElementById("sys-environment").value,
+                    ip_domain: document.getElementById("sys-ip-domain").value.trim(),
+                    servers: servers
+                })
+            });
+            if (res.ok) {
+                showToast(`System "${name}" registered!`, "success");
+                if (systemModalInstance) systemModalInstance.hide();
+                await refreshSystems();
+            } else {
+                const err = await res.json();
+                showToast(err.detail || "Failed to register system.", "error");
+            }
         }
     } catch (e) {
-        showToast("Error registering system.", "error");
+        showToast("Error saving system.", "error");
+    }
+}
+
+async function deleteSystem(name) {
+    if (!confirm(`Delete system "${name}"? This will not disconnect running servers.`)) return;
+    try {
+        const res = await fetch(`${API_BASE}/api/systems/${encodeURIComponent(name)}`, { method: "DELETE" });
+        if (res.ok) {
+            showToast(`System "${name}" removed.`, "success");
+            await refreshSystems();
+        } else {
+            showToast("Failed to delete system.", "error");
+        }
+    } catch (e) {
+        showToast("Error deleting system.", "error");
     }
 }
 
@@ -579,8 +721,47 @@ async function toggleTier(tier, enabled) {
     }
 }
 
+async function refreshLearningStatus() {
+    try {
+        const res = await fetch(`${API_BASE}/api/learn/status`);
+        const data = await res.json();
+        const btn = document.getElementById("btn-learn");
+        const badge = document.getElementById("tune-badge");
+        if (!btn) return;
+
+        const canTune = data.tunable_ready === true;
+
+        btn.disabled = !canTune;
+        btn.classList.toggle("opacity-50", !canTune);
+        btn.classList.toggle("cursor-not-allowed", !canTune);
+        btn.classList.toggle("bg-green-600", canTune);
+        btn.classList.toggle("text-white", canTune);
+        btn.classList.toggle("border-green-500", canTune);
+        btn.classList.toggle("hover:bg-green-500", canTune);
+        btn.classList.toggle("bg-surface", !canTune);
+        btn.classList.toggle("hover:bg-surface-dim", !canTune);
+        btn.classList.toggle("border-outline", !canTune);
+
+        if (badge) {
+            if (data.tunable_ready) {
+                badge.textContent = `${data.tunable_samples} ready`;
+                badge.className = "ml-1.5 px-1.5 py-0.5 text-[9px] font-mono bg-green-700 text-green-100 rounded-full";
+            } else if (data.tunable_samples > 0) {
+                badge.textContent = `${data.tunable_samples}/100`;
+                badge.className = "ml-1.5 px-1.5 py-0.5 text-[9px] font-mono bg-amber-900 text-amber-200 rounded-full";
+            } else {
+                badge.textContent = "";
+                badge.className = "ml-1.5 px-1.5 py-0.5 text-[9px] font-mono";
+            }
+        }
+    } catch (e) {
+        // Silently ignore — status check isn't critical
+    }
+}
+
 async function runLearningPipeline() {
     const btn = document.getElementById("btn-learn");
+    const badge = document.getElementById("tune-badge");
     if (btn) {
         btn.disabled = true;
         btn.innerHTML = `<svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Tuning...`;
@@ -589,9 +770,11 @@ async function runLearningPipeline() {
         const res = await fetch(`${API_BASE}/api/learn`, { method: "POST" });
         const data = await res.json();
         if (!res.ok) {
-            showToast("Learning pipeline failed.", "error");
+            showToast("Learning pipeline failed: " + (data.detail || "unknown error"), "error");
+        } else if (data.rules_optimized > 0) {
+            showToast(data.message || "Thresholds optimized and deployed.", "success");
         } else {
-            showToast("Successfully optimized AI thresholds.", "success");
+            showToast(data.message || "Not enough data yet — triage more alerts.", "info");
         }
     } catch (e) {
         showToast("Error executing learning pipeline.", "error");
@@ -600,6 +783,7 @@ async function runLearningPipeline() {
             btn.disabled = false;
             btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Tune`;
         }
+        refreshLearningStatus();
     }
 }
 

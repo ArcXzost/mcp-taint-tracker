@@ -3,7 +3,7 @@ import logging
 from typing import List, Dict, Any, Tuple, Optional
 from neo4j import GraphDatabase
 
-from schema import Event, Node, Edge
+from schema import Event, Node, Edge, _extract_text
 from taint_engine import TaintSourceEngine
 from flow_attribution import FlowAttributionEngine
 from metrics import GLOBAL_METRICS
@@ -53,6 +53,19 @@ class Neo4jSessionGraph:
         initial_taints = set(TaintSourceEngine.get_sources(event.tool_name))
         inherited_taints = set(initial_taints)
 
+        # ── Secret Scanning ──
+        output_text = _extract_text(event.tool_output)
+        if TaintSourceEngine.has_secret_patterns(output_text):
+            inherited_taints.add("credential")
+
+        import functools
+        
+        @functools.lru_cache(maxsize=8192)
+        def _cached_flow_check(prev_output_json: str, curr_input_json: str):
+            prev_output = json.loads(prev_output_json)
+            curr_input = json.loads(curr_input_json)
+            return self.flow_engine.check_flow(prev_output, curr_input)
+
         try:
             with self.driver.session() as session:
                 # 1. Fetch previous events in this session
@@ -64,15 +77,16 @@ class Neo4jSessionGraph:
                 edges_to_create = []
                 for record in result:
                     prev_call_id = record["call_id"]
+                    prev_output_json = record["tool_output"]
                     try:
-                        prev_output = json.loads(record["tool_output"])
+                        prev_output = json.loads(prev_output_json)
                     except:
                         prev_output = {}
                     
                     prev_taints = record["taint_labels"] or []
 
-                    # Flow attribution
-                    detection = self.flow_engine.check_flow(prev_output, event.tool_input)
+                    # Flow attribution (cached)
+                    detection = _cached_flow_check(prev_output_json, json.dumps(event.tool_input))
                     if detection.flow_detected:
                         edges_to_create.append({
                             "source": prev_call_id,
@@ -83,7 +97,18 @@ class Neo4jSessionGraph:
                         })
                         inherited_taints.update(prev_taints)
 
-                # 2. Insert new event node
+                # 2. Insert new event node and create edges in one operation
+                params = {
+                    "call_id": event.call_id,
+                    "session_id": event.session_id,
+                    "tool_name": event.tool_name,
+                    "server_name": event.server_name,
+                    "timestamp": event.timestamp,
+                    "tool_input": json.dumps(event.tool_input),
+                    "tool_output": json.dumps(event.tool_output),
+                    "taint_labels": list(inherited_taints),
+                    "edges": edges_to_create,
+                }
                 session.run(
                     """
                     CREATE (e:Event {
@@ -96,32 +121,18 @@ class Neo4jSessionGraph:
                         tool_output: $tool_output,
                         taint_labels: $taint_labels
                     })
+                    WITH e
+                    UNWIND $edges AS edge
+                    MATCH (src:Event {call_id: edge.source})
+                    MATCH (tgt:Event {call_id: edge.target})
+                    CREATE (src)-[:FLOWS_TO {
+                        confidence: edge.confidence,
+                        method: edge.method,
+                        evidence: edge.evidence
+                    }]->(tgt)
                     """,
-                    call_id=event.call_id,
-                    session_id=session_id,
-                    tool_name=event.tool_name,
-                    server_name=event.server_name,
-                    timestamp=event.timestamp,
-                    tool_input=json.dumps(event.tool_input),
-                    tool_output=json.dumps(event.tool_output),
-                    taint_labels=list(inherited_taints)
+                    params
                 )
-
-                # 3. Create edges
-                if edges_to_create:
-                    session.run(
-                        """
-                        UNWIND $edges AS edge
-                        MATCH (src:Event {call_id: edge.source})
-                        MATCH (tgt:Event {call_id: edge.target})
-                        CREATE (src)-[:FLOWS_TO {
-                            confidence: edge.confidence,
-                            method: edge.method,
-                            evidence: edge.evidence
-                        }]->(tgt)
-                        """,
-                        edges=edges_to_create
-                    )
         except Exception as e:
             logger.error(f"Neo4j add_event failed: {e}")
             # Fallback logic could go here

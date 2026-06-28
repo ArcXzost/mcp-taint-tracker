@@ -13,6 +13,7 @@ Every detection must store evidence. Never emit a verdict without explanation.
 
 import re
 import time
+import functools
 import logging
 from typing import Dict, Any, List, Set, Optional, Tuple
 
@@ -74,14 +75,15 @@ class FlowAttributionEngine:
         
         self.active_tiers = {"explicit": True, "lexical": True, "semantic": True}
         
-        # Load optimized thresholds if available
+        # Load optimized thresholds if available (new nested format from learning pipeline)
         thresh_file = "optimized_thresholds.json"
         if os.path.exists(thresh_file):
             try:
                 with open(thresh_file, "r") as f:
                     opt = json.load(f)
-                semantic_threshold = opt.get("semantic_threshold", semantic_threshold)
-                lexical_threshold = opt.get("lexical_threshold", lexical_threshold)
+                global_section = opt.get("_global", opt)
+                semantic_threshold = global_section.get("semantic_threshold", opt.get("semantic_threshold", semantic_threshold))
+                lexical_threshold = global_section.get("lexical_threshold", opt.get("lexical_threshold", lexical_threshold))
                 logger.info("Loaded optimized thresholds: Semantic=%.2f, Lexical=%.2f", semantic_threshold, lexical_threshold)
             except Exception as e:
                 logger.error("Failed to load optimized thresholds: %s", e)
@@ -315,10 +317,18 @@ class FlowAttributionEngine:
 
     # ── Phase C: Semantic ──────────────────────────────────────────────
 
+    def _get_embedding(self, text: str):
+        """Compute or retrieve cached embedding for a text string."""
+        return self._embedding_cache(text)
+
+    @functools.lru_cache(maxsize=4096)
+    def _embedding_cache(self, text: str):
+        return self.model.encode(text, convert_to_tensor=True)
+
     def _check_semantic(self, prev_text: str, curr_text: str) -> FlowDetection:
         """Detect meaning-preserving paraphrasing via sentence embeddings."""
-        emb_prev = self.model.encode(prev_text, convert_to_tensor=True)
-        emb_curr = self.model.encode(curr_text, convert_to_tensor=True)
+        emb_prev = self._get_embedding(prev_text)
+        emb_curr = self._get_embedding(curr_text)
         score = float(util.cos_sim(emb_prev, emb_curr).item())
 
         if score >= self.semantic_threshold:
