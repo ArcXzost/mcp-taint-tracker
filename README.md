@@ -1,4 +1,4 @@
-# MCP Semantic Taint Tracker
+# TaintDog
 
 **Multi-hop data-flow tracing across LLM tool ecosystems.**
 
